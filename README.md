@@ -47,6 +47,7 @@ Windward makes that exposure visible and quantifiable:
 Browser  (React 19 SPA)
    │
    │   GET /api/status  ·  GET /api/dashboard?cutoff=HH:MM  ·  POST /api/refresh
+   │   GET /api/backtest?cutoff=HH:MM  ·  GET /api/risk-brief?cutoff=HH:MM&date=YYYY-MM-DD
    ▼
 Nginx  :80 → FastAPI (uvicorn)  :8000
                │
@@ -56,6 +57,7 @@ Nginx  :80 → FastAPI (uvicorn)  :8000
                │
           domain.py          ──  ZoneInfo(Europe/London) cutoffs · as-of revision
                                  selection · MAE / RMSE / bias / P90 / coverage
+                                 walk_forward_backtest() · decision_risk_brief()
                │
           main.py            ──  FastAPI routes · atomic JSON cache (.tmp rename)
                                  · Vercel /tmp adapter · background task (Docker)
@@ -101,7 +103,8 @@ n8q4x2/
 │       ├── test_api.py        API endpoints, cache preservation, Vercel env detection
 │       ├── test_elexon.py     Exact request parameters, WIND filter, upstream errors
 │       ├── test_domain.py     Cutoff leakage, revision ordering, timezone, metrics
-│       └── test_regression.py Coverage gaps, boundary conditions, empty inputs
+│       ├── test_regression.py Coverage gaps, boundary conditions, empty inputs
+│       └── test_backtest.py   Walk-forward backtest leakage, timing, threshold guards
 │
 └── frontend/
     ├── Dockerfile
@@ -162,6 +165,8 @@ The Vite config proxies `/api` to `localhost:8000`.
 | `GET` | `/api/status` | Import progress, last-synced timestamp, error string |
 | `POST` | `/api/refresh` | Trigger Elexon import (background on Docker, blocking on Vercel) |
 | `GET` | `/api/dashboard?cutoff=09:50` | Full January analysis; `cutoff` accepts any `HH:MM` in `[00:00, 23:59]` |
+| `GET` | `/api/backtest?cutoff=09:50` | Walk-forward bias-correction backtest across all 31 decision days |
+| `GET` | `/api/risk-brief?cutoff=09:50&date=2026-01-31` | Per-day risk brief (forecast position, prior tendency, large misses) |
 
 Interactive docs: `http://localhost:8000/docs`
 
@@ -175,7 +180,7 @@ pip install -r requirements-dev.txt
 PYTHONPATH=. python -m pytest -v
 ```
 
-**31 tests, 4 modules** — all deterministic, no network calls, no test data files:
+**47 tests, 5 modules** — all deterministic, no network calls, no test data files:
 
 | Module | What it covers |
 |--------|---------------|
@@ -183,6 +188,7 @@ PYTHONPATH=. python -m pytest -v
 | `test_elexon.py` | Exact SOURCES parameters sent in HTTP requests, empty/malformed response → `UpstreamError`, WIND-only filter |
 | `test_domain.py` | Cutoff prevents look-ahead, revision ordering, BST/GMT timezone, prior-known MAE excludes future actuals, null not zero for unmatched periods |
 | `test_regression.py` | Hourly WINDFOR → 50% coverage, cutoff boundary (≤ inclusive), multiple revisions, empty inputs, negative generation rejection, late FUELHH publishTime |
+| `test_backtest.py` | Future-data leakage (day 0 has 0 pairs), FUELHH actual-publication timing, threshold guard (exactly 72 pairs), bias direction, non-negativity, same eval set, WINDFOR/FUELHH alignment |
 
 ---
 
@@ -254,6 +260,42 @@ Both datasets are from the [Elexon BMRS public API](https://bmrs.elexon.co.uk/ap
 | Metrics | MAE, RMSE, bias, P90 absolute error, overforecast rate — matched pairs only |
 | Match | Exact UTC `startTime` equality; no interpolation or zero-fill |
 
+### Walk-forward bias-correction backtest
+
+For each decision day D, the mean signed error is computed from all prior days D' < D where:
+1. A WINDFOR forecast existed at D''s cutoff for the relevant delivery startTime
+2. The FUELHH actual for that startTime was published **at or before D's cutoff** (strictly causal — the buyer on day D can see this actual)
+
+The adjusted forecast is `max(0, raw_forecast − mean_signed_error)` — clamped to zero so it cannot go negative.
+
+**Minimum threshold:** At least 72 matched (forecast, causal-actual) pairs from prior days must exist before an adjusted estimate is shown. Days below this threshold display "Insufficient history".
+
+**Evaluation:** Both original and adjusted forecasts are evaluated on the **same matched pairs** (where both the as-of forecast and retrospective FUELHH actual are available on day D). This ensures the comparison is apples-to-apples.
+
+**WINDFOR/FUELHH alignment sensitivity:** WINDFOR is published at hourly granularity; FUELHH is half-hourly. Approximately 50% of half-hourly delivery slots have no corresponding WINDFOR entry. All backtest computations operate on the matched subset only — unmatched half-hours are excluded from training and evaluation. This is explicitly noted in every API response and UI panel.
+
+> **Label:** All backtest results are marked *exploratory retrospective analysis*. The mean bias is estimated from a single month of data and has high sampling uncertainty. This does not constitute a proven forward strategy, a prediction interval, or a financial saving estimate.
+
+### Decision risk brief
+
+For a given decision date and cutoff, the risk brief surfaces:
+- **Forecast position:** mean WINDFOR value visible at cutoff, data freshness (hours between latest publish and cutoff), and coverage
+- **Prior tendency:** overforecast bias computed from all earlier days where the FUELHH actual was published at or before the target day's cutoff
+- **Recent large misses:** days in the past 7 where MAE exceeded 1.5× the historical average, with an explanation of what to watch for
+
+The brief explicitly does **not** compute demand, thermal generation requirements, or wholesale purchase volumes — those inputs were not provided.
+
+### Assumptions and limitations
+
+| Assumption | Detail |
+|------------|--------|
+| January 2026 only | The analysis period is fixed; extending requires re-fetching Elexon data |
+| GB national wind only | WINDFOR and FUELHH cover aggregate GB wind, not individual assets or zones |
+| WINDFOR hourly resolution | ~50% of half-hourly slots have no direct WINDFOR entry; unmatched slots are null |
+| Single-month bias estimate | 31 days is a small sample; sampling uncertainty in mean bias is high |
+| Retrospective actuals | FUELHH actuals may be revised; the tool uses the latest available revision as the evaluation reference |
+| No demand or price data | Procurement exposure cannot be calculated without a separate demand or position file |
+
 ---
 
-*AI tools used during development: Google Gemini (Antigravity IDE) and OpenAI ChatGPT — for domain research, code generation assistance, test design, and documentation.*
+*AI tools used during development: Google Gemini (Antigravity IDE) — for domain research, code generation assistance, test design, and documentation.*

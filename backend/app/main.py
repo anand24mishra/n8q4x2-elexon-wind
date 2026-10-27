@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .domain import analyze, normalize
+from .domain import analyze, decision_risk_brief, normalize, walk_forward_backtest
 from .elexon import SOURCES, load_january
 
 app = FastAPI(title="Windward | Elexon Wind Intelligence", version="2.0.0", description="January 2026 decision-time GB wind forecast evaluation")
@@ -138,6 +138,36 @@ async def dashboard(cutoff: str = Query(default="09:50", pattern=r"^(?:[01]\d|2[
             "rawRecords": {"actual": len(data["actual"]), "forecast": len(data["forecast"])},
             "sourceParams": data.get("sourceParams", SOURCES),
             "methodology": "Select latest WINDFOR per exact delivery startTime where publishTime <= decision cutoff, compare with FUELHH WIND actuals. No imputation."}
+
+
+
+@app.get("/api/backtest")
+async def backtest(cutoff: str = Query(default="09:50", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")):
+    data = cached_data()
+    if data is None and _IS_VERCEL:
+        state.update(status="loading", done=0, total=2, error=None)
+        await refresh_data()
+        data = cached_data()
+    if data is None:
+        raise HTTPException(503, detail="Elexon data not imported yet. Please sync Elexon.")
+    result = walk_forward_backtest(data["actual"], data["forecast"], cutoff=cutoff)
+    return {**result, "source": "elexon", "lastSynced": data.get("fetchedAt")}
+
+
+@app.get("/api/risk-brief")
+async def risk_brief(
+    cutoff: str = Query(default="09:50", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$"),
+    date: str = Query(default="2026-01-31"),
+):
+    data = cached_data()
+    if data is None and _IS_VERCEL:
+        state.update(status="loading", done=0, total=2, error=None)
+        await refresh_data()
+        data = cached_data()
+    if data is None:
+        raise HTTPException(503, detail="Elexon data not imported yet. Please sync Elexon.")
+    result = decision_risk_brief(data["actual"], data["forecast"], cutoff=cutoff, target_date=date)
+    return {**result, "source": "elexon", "lastSynced": data.get("fetchedAt")}
 
 
 DIST = Path(os.getenv("FRONTEND_DIST", "/app/frontend/dist"))
