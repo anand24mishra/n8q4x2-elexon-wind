@@ -1,4 +1,4 @@
-# Windward · Day-ahead forecast decision workbench
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/262f72cb-d401-4144-b987-3c500dbc84f4" /># Windward · Day-ahead forecast decision workbench
 
 A January 2026 pilot for one question: **what GB wind forecast was visible before a day-ahead purchase, how much history supported trusting it, and would two predefined bias corrections have changed the estimate?**
 
@@ -217,17 +217,17 @@ On Vercel, `VERCEL` selects `/tmp` for the snapshot and makes `/api/refresh` syn
 - No confidence interval.
 - National GB wind only, not a single site.
 
-## 19. AI-assisted development
-
-Earlier project work used Google Gemini in the Antigravity IDE for research, implementation help, tests, and documentation. The scenario workbench, tests, CI workflow, this README, and `RECORDING_SCRIPT.md` were implemented with Cursor’s coding agent. Figures in section 8 were recomputed from Elexon in this session. They are not model-invented market data.
-
-## Video demo
-
-The submission asks for an **unlisted** YouTube video recorded by the author. The speaking script is [`RECORDING_SCRIPT.md`](RECORDING_SCRIPT.md). Part 1 is a customer overview of at most 5 minutes. Part 2 is a tech-lead walkthrough. The local assignment text was truncated after “architecture, design, analysis, c”, so the script’s Part 2 follows that opening plus the design in this repo. This repository does not upload the video and does not contain a YouTube URL. Record it, upload it as Unlisted, and submit the link yourself.
-
 ## Screenshots
 
 These images are the January dashboard from an earlier commit. They do not show the scenario workbench.
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/81c4500c-7e0d-4ed6-b4b3-66cee547dcd7" />
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/67e78370-b80c-4a28-9d2e-d28d0d0b74cd" />
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/3785d47a-33db-444b-9a39-8a9e3985948a" />
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/dd9790a7-ea4f-46a4-bf1a-a3bd7ccc431f" />
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/1cf0e121-2d33-415c-a4a3-d9f8df93fc28" />
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/996d7eea-2763-45c8-9bec-8a13caa1dd10" />
 
-<img width="1464" height="834" alt="Overview" src="https://github.com/user-attachments/assets/37f395d7-9a71-4912-913a-c87de3481a15" />
-<img width="1464" height="834" alt="Forecast explorer" src="https://github.com/user-attachments/assets/e4decc74-e950-497b-86fe-0b4ceb277684" />
+
+
+
+
