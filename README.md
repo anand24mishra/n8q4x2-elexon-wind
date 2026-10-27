@@ -5,6 +5,7 @@ A decision-support tool for UK electricity procurement teams. Windward answers a
 The platform pulls live data from the Elexon BMRS public API, reconstructs point-in-time forecast snapshots for each half-hour of January 2026, and delivers interactive accuracy analytics without relying on pre-computed or simulated values.
 
 **Live app:** https://n8q4x2-elexon-wind.vercel.app/
+
 **Stack:** React 19 · Vite 7 · FastAPI · Python 3.12 · HTTPX · Nginx · Docker Compose  
 **Data:** Elexon BMRS | WINDFOR (forecast) and FUELHH (actuals), January 2026
 
@@ -25,7 +26,18 @@ Windward makes that exposure visible and quantifiable:
 
 ## Screenshot
 
-> _Record and embed a screenshot here after first deployment_
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/37f395d7-9a71-4912-913a-c87de3481a15" />
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/e4decc74-e950-497b-86fe-0b4ceb277684" />
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/29dc5400-8903-4308-890c-7fcf0a5aa1a4" />
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/49c473b5-19a6-4a99-84d5-c01ff6e9065d" />
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/ad9b6063-0c9d-4cbb-8e97-00788bd8fce4" />
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/b999a31a-02cc-496d-bb4b-5060528040eb" />
+<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/10c76a19-98e5-4edf-9329-b906491ec67a" />
+
+
+
+
+
 
 ---
 
