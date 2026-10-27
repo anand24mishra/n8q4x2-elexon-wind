@@ -1,301 +1,233 @@
-# Windward · GB Wind Forecast Intelligence
+# Windward · Day-ahead forecast decision workbench
 
-A decision-support tool for UK electricity procurement teams. Windward answers a precise question: **given the wind generation forecast visible at a specific market cutoff, how accurately did it predict actual generation?**
+A January 2026 pilot for one question: **what GB wind forecast was visible before a day-ahead purchase, how much history supported trusting it, and would two predefined bias corrections have changed the estimate?**
 
-The platform pulls live data from the Elexon BMRS public API, reconstructs point-in-time forecast snapshots for each half-hour of January 2026, and delivers interactive accuracy analytics without relying on pre-computed or simulated values.
+Live app: https://n8q4x2-elexon-wind.vercel.app/
 
-**Live app:** https://n8q4x2-elexon-wind.vercel.app/
+Repository: https://github.com/anand24mishra/n8q4x2-elexon-wind
 
-**Stack:** React 19 · Vite 7 · FastAPI · Python 3.12 · HTTPX · Nginx · Docker Compose  
-**Data:** Elexon BMRS | WINDFOR (forecast) and FUELHH (actuals), January 2026
+Stack: React 19, Vite, FastAPI, HTTPX, Docker Compose, Vercel. Data: Elexon BMRS WINDFOR and FUELHH only.
 
----
+## 1. Business problem
 
-## Why it exists
+A UK day-ahead buyer commits on the morning before delivery, often around the 09:50 UK N2EX example cutoff. The wind assumption at that moment is whatever WINDFOR revision had already been published. This app reconstructs that information set for 1–31 January 2026 (delivery 2 January–1 February) and scores it against measured wind. It does not place a trade or recommend a purchase volume.
 
-UK day-ahead electricity buyers commit to wholesale positions the morning before delivery — typically by the N2EX gate closure at 09:50 UK time. Their wind generation assumption is based on whatever forecast existed at that moment. If that forecast proves wrong, they face unplanned balancing costs.
+## 2. Why publication time matters
 
-Windward makes that exposure visible and quantifiable:
+A forecast is eligible only when `publishTime <= cutoff` in Europe/London. An actual may enter the bias calculation only when **that outturn’s publication timestamp** is at or before the same cutoff. An earlier decision date is not enough: a late FUELHH revision must not leak into a morning decision. One second after the cutoff is excluded. The latest eligible revision is the one that is used.
 
-- Shows exactly which WINDFOR revision was available at any configurable cutoff
-- Computes MAE, RMSE, signed bias, P90 absolute error, and overforecast rate against FUELHH actuals
-- Breaks results down to individual settlement periods so traders can trace every number back to source
-- Lets analysts compare how accuracy would differ at an earlier or later cutoff
-
----
-
-## Screenshot
-
-<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/37f395d7-9a71-4912-913a-c87de3481a15" />
-<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/e4decc74-e950-497b-86fe-0b4ceb277684" />
-<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/29dc5400-8903-4308-890c-7fcf0a5aa1a4" />
-<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/49c473b5-19a6-4a99-84d5-c01ff6e9065d" />
-<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/ad9b6063-0c9d-4cbb-8e97-00788bd8fce4" />
-<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/b999a31a-02cc-496d-bb4b-5060528040eb" />
-<img width="1464" height="834" alt="image" src="https://github.com/user-attachments/assets/10c76a19-98e5-4edf-9329-b906491ec67a" />
-
-
-
-
-
-
----
-
-## Architecture
+## 3. Architecture
 
 ```
-Browser  (React 19 SPA)
-   │
-   │   GET /api/status  ·  GET /api/dashboard?cutoff=HH:MM  ·  POST /api/refresh
-   │   GET /api/backtest?cutoff=HH:MM  ·  GET /api/risk-brief?cutoff=HH:MM&date=YYYY-MM-DD
-   ▼
-Nginx  :80 → FastAPI (uvicorn)  :8000
-               │
-          elexon.py          ──  async HTTPX · exponential back-off · no fallback
-          │   WINDFOR    publishDateTimeFrom / publishDateTimeTo
-          │   FUELHH     settlementDateFrom / settlementDateTo  → fuelType=WIND
-               │
-          domain.py          ──  ZoneInfo(Europe/London) cutoffs · as-of revision
-                                 selection · MAE / RMSE / bias / P90 / coverage
-                                 walk_forward_backtest() · decision_risk_brief()
-               │
-          main.py            ──  FastAPI routes · atomic JSON cache (.tmp rename)
-                                 · Vercel /tmp adapter · background task (Docker)
+Browser (React 19, Vite, no Redux)
+  GET /api/dashboard | /api/backtest | /api/risk-brief | /api/scenarios
+  POST /api/refresh
+        │
+        ▼
+FastAPI
+  elexon.py    HTTPX, retries, no mock fallback
+  domain.py    as-of selection, metrics, walk-forward, scenarios
+  main.py      routes, atomic JSON snapshot, request logs
 ```
 
-**Deployment targets:**
+| Target | Frontend | API | Snapshot |
+| --- | --- | --- | --- |
+| Docker Compose | Nginx | uvicorn | named volume |
+| Vercel | static Vite build | Python serverless (`backend/api/index.py`) | `/tmp` on that instance only |
+| Heroku | FastAPI static files | one dyno | ephemeral disk |
 
-| Target | Frontend | Backend | Cache |
-|--------|----------|---------|-------|
-| Docker Compose | Nginx container | FastAPI container | Named volume (`windward_data`) |
-| Vercel | Static CDN (`frontend/dist`) | Python serverless function (`api/index.py`) | `/tmp` (per warm instance) |
-| Heroku | FastAPI static file mount | Single dyno | Ephemeral dyno filesystem |
+Shared analytical state in the UI is the decision date, the UK cutoff, and the scenario strategy. Changing the date or cutoff refetches with `AbortController`, so an older response cannot overwrite a newer selection.
 
----
+## 4. Data sources
 
-## Repository layout
+Only these two requests. Records are real Elexon rows. Missing values stay missing.
 
+- WINDFOR: https://data.elexon.co.uk/bmrs/api/v1/datasets/WINDFOR/stream?publishDateTimeFrom=2026-01-01T00%3A00%3A00Z&publishDateTimeTo=2026-02-01T00%3A00%3A00Z
+- FUELHH: https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELHH/stream?settlementDateFrom=2026-01-02&settlementDateTo=2026-02-02 then `fuelType=WIND`
+
+WINDFOR is filtered by when the forecast was **published**. FUELHH is filtered by **settlement date**, because that is how measured generation is indexed.
+
+A direct fetch on 27 October 2026 returned 18,104 WINDFOR records, 30,720 FUELHH records, and 1,536 FUELHH rows with `fuelType=WIND` before the delivery window was restricted.
+
+## 5. Existing views
+
+The sidebar still has Overview, Forecast explorer, Accuracy review, Bias backtest, Risk brief, and Methodology.
+
+- Overview and accuracy: MAE, RMSE, signed bias, P90 absolute error, matched coverage. Signed error is forecast minus actual.
+- Forecast explorer: half-hour table. Hourly WINDFOR markers are connected across the unobserved half-hour. No synthetic row is inserted. Hover shows delivery time, forecast, actual, publication time, MW, and missing-data status.
+- Bias backtest: the original expanding-mean walk-forward.
+- Risk brief: forecast position and prior tendency at the cutoff. Same decision date as the other views.
+- CSV export of the matched period table remains on the page header.
+
+Cutoff choices are the existing UK times: 08:30, 09:20, 09:50, 10:30, 12:30, 15:30.
+
+## 6. Scenario workbench
+
+Sidebar: **Scenario workbench**. One route does the calculation:
+
+`GET /api/scenarios?date=2026-01-15&cutoff=09:50`
+
+Optional `strategy` is `original`, `expanding`, `rolling7Day`, or `all`. Any other value is HTTP 400. An unknown query parameter is HTTP 400. A date outside 1–31 January 2026 is HTTP 400. No imported snapshot is HTTP 503.
+
+The page shows, from that response:
+
+- the raw forecast, the expanding-history adjustment, and the rolling-history adjustment
+- the signed bias used, the eligible training count, and the 72-pair threshold
+- latest forecast publication time, freshness at the cutoff, and forecast coverage
+- a chart of the three forecasts against retrospective actuals
+- historical scores on a shared timestamp set
+- a short retrospective reading of which method had the lower error
+- an explicit insufficient-history state
+- **Export JSON report** and **Markdown**
+
+**Known at decision time** (badge on the page): original forecast, publication time, training count, historical signed bias, adjusted estimate, prior error stats, freshness.
+
+**Learned after delivery**: actual generation, realized error, MAE / RMSE / bias / P90, and whether the adjustment helped that day. Those figures are labeled retrospective.
+
+## 7. Strategy definitions
+
+For decision date D:
+
+| Strategy | Rule |
+| --- | --- |
+| Original | Latest WINDFOR value with `publishTime <= cutoff`. |
+| Expanding mean correction | Subtract the mean signed error of every causally eligible prior pair. |
+| Rolling 7-day mean correction | Same subtraction, using only the previous seven decision dates. |
+
+`adjusted = max(0, raw forecast − bias)`. Both corrections require at least 72 causally eligible pairs. Below that the status is `insufficient_history`, the sample count is shown, the original forecast remains, and no adjustment is invented. The window and the threshold are fixed exploratory baselines.
+
+## 8. Walk-forward evaluation
+
+Each decision day is scored only with information available at that day’s cutoff. Successes and failures are both reported. There is no confidence interval and no money metric.
+
+At cutoff 09:50, recomputed from the live extract on 27 October 2026:
+
+| Population | What it is | Result |
+| --- | --- | --- |
+| Dashboard | All matched half-hours, 31 decision days | 1,488 expected half-hours, 744 matches, MAE 1,995.57 MW, signed bias +1,727.98 MW, 50% matched coverage |
+| Expanding-eligible walk-forward | Days with at least 72 prior causal pairs | 27 days, 648 matches, original MAE 2,026.80 MW, adjusted MAE 1,458.04 MW |
+| Rolling 7-day, same style of gate | Previous seven decision dates, same 72-pair gate | 27 days, 648 matches, adjusted MAE 1,559.50 MW |
+| Three-way common set | Days where **both** corrections clear 72 pairs | On this extract, the same 27 days and 648 matches. Original MAE 2,026.80 MW, expanding 1,458.04 MW, rolling 1,559.50 MW. 19 days improved and 8 worsened under each correction |
+
+The 744-row dashboard set is not the comparison set. On 15 January 2026 the expanding sample was 322 pairs (bias about +1,588 MW) and the rolling sample was 154 pairs (bias about +1,744 MW). On that delivery day the raw forecast had the lower realized MAE (about 897 MW versus about 1,366 and 1,469). A correction that helps the month can hurt a single day. 1 January has zero training pairs and both corrections stay unavailable.
+
+These are retrospective January observations. They are not a guaranteed future error reduction.
+
+## 9. Avoiding leakage
+
+- Forecast eligibility: `publishTime <= cutoff`, including exactly at the cutoff.
+- Training actuals: latest FUELHH revision whose publication time is `<= cutoff`.
+- Evaluation actuals: latest revision, used only in the retrospective block.
+- Adjusted values are not compared on a different timestamp set from the raw forecast.
+- Tests cover the cutoff boundary, a late actual, the 71/72 threshold, and a correction that increases error.
+
+## 10. Forecast and actual granularity
+
+WINDFOR `startTime` in this extract is hourly. FUELHH wind is half-hourly settlement, in MW. The baseline join is exact `startTime` equality, which is why matched coverage is about 50 percent. Adjacent half-hours are not averaged. An hour-average actual was not implemented: the fields used here do not establish that the hourly WINDFOR value is that average, and averaging would create a generation measure the source did not publish. The report field `hourlyAlignmentSensitivity` is `not_implemented` for that reason.
+
+## 11. Reproduce a scenario
+
+```bash
+# from the repo root, with the API already serving a real snapshot
+curl "http://localhost:8000/api/scenarios?date=2026-01-15&cutoff=09:50"
 ```
-n8q4x2/
-├── vercel.json                Vercel single-project config (frontend + serverless API)
-├── docker-compose.yml         Nginx + FastAPI + named cache volume
-├── Dockerfile                 Single-image build for Heroku
-├── heroku.yml                 Heroku container process file
-├── .gitignore
-├── .dockerignore
-│
-├── api/
-│   ├── index.py               Vercel ASGI entry point (re-exports FastAPI app)
-│   └── requirements.txt       Python deps for the Vercel serverless function
-│
-├── backend/
-│   ├── Dockerfile
-│   ├── requirements.txt       Runtime: fastapi, uvicorn, httpx
-│   ├── requirements-dev.txt   Dev: pytest, anyio, httpx
-│   ├── api/
-│   │   └── index.py           Vercel entry point (re-exports FastAPI app)
-│   └── app/
-│       ├── main.py            API routes, atomic cache, Vercel/Docker refresh strategy
-│       ├── elexon.py          Elexon BMRS HTTP adapter with retry and validation
-│       └── domain.py          Pure analysis: cutoffs, as-of selection, metrics
-│   └── tests/
-│       ├── conftest.py
-│       ├── test_api.py        API endpoints, cache preservation, Vercel env detection
-│       ├── test_elexon.py     Exact request parameters, WIND filter, upstream errors
-│       ├── test_domain.py     Cutoff leakage, revision ordering, timezone, metrics
-│       ├── test_regression.py Coverage gaps, boundary conditions, empty inputs
-│       └── test_backtest.py   Walk-forward backtest leakage, timing, threshold guards
-│
-└── frontend/
-    ├── Dockerfile
-    ├── nginx/default.conf     Reverse proxy + 185 s timeout + SPA fallback
-    ├── package.json
-    ├── package-lock.json
-    ├── vite.config.js
-    ├── index.html
-    └── src/
-        ├── main.jsx
-        ├── App.jsx            Dashboard, explorer, accuracy, methodology, CSV export
-        └── style.css
+
+Or open Scenario workbench, choose 15 Jan 2026 and 09:50, and read the same fields. The response `provenance.contentHash` is a SHA-256 of the normalised source rows. The same normalised snapshot produces the same hash. A changed generation or publication time changes the hash. `identity.generatedAt` is the analysis time and is not part of the hash.
+
+## 12. API
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/api/health` | Liveness and whether a snapshot exists |
+| GET | `/api/status` | Import progress |
+| POST | `/api/refresh` | Fetch Elexon. Background in Docker. Awaited on Vercel |
+| GET | `/api/dashboard?cutoff=09:50` | 31-day as-of analysis |
+| GET | `/api/backtest?cutoff=09:50` | Expanding-mean walk-forward |
+| GET | `/api/risk-brief?cutoff=09:50&date=2026-01-31` | Position and prior tendency at the cutoff |
+| GET | `/api/scenarios?date=2026-01-15&cutoff=09:50` | Scenario workbench |
+
+Interactive docs when the API process is running: `http://localhost:8000/docs`.
+
+Scenario JSON includes `identity`, `exAnte`, `periods`, `retrospective`, `dailyHistory`, `monthSummary`, `evaluationPopulations`, `missingData`, `provenance`, `reproducibility`, `report`, and `limitations`. Logs include a request id, route, status, duration, Elexon fetch duration, cache hit or miss, and scenario calculation duration. They do not include payloads or secrets.
+
+## 13. Report export
+
+Scenario workbench downloads:
+
+- `windward-decision-scenario-<date>-<cutoff>.json`
+- the same stem as Markdown
+
+The document carries the project name, decision date, delivery date, UK cutoff, creation time, both source URLs and parameters, retrieval time, content hash, strategy name, the 72-pair rule, the non-negative adjustment, training count, bias, raw and adjusted values, retrospective metrics, missing-data counts, improved and worsened counts, algorithm version `scenario-workbench-1`, and the limitations below. Retrospective outcomes are under **LEARNED AFTER DELIVERY**.
+
+## 14. Tests and CI
+
+Local commands that were run on 27 October 2026:
+
+```bash
+PYTHONPATH=backend backend/.venv/bin/python -m pytest backend/tests -q
+# 71 passed
+
+cd frontend && npm run build
+# vite build completed, no build error
 ```
 
----
+From a clean environment:
 
-## Running locally
+```bash
+pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+PYTHONPATH=backend python -m pytest backend/tests -q
 
-### Docker Compose (recommended)
+cd frontend && npm ci && npm run build
+```
+
+`.github/workflows/ci.yml` runs those two jobs on push and pull request (Python 3.12 and Node 22, with dependency caching). This README does not claim a green GitHub Actions run. Check the Actions tab after the workflow finishes.
+
+Tests cover cutoff boundaries, late actuals, 0 / 71 / 72 training pairs, both bias signs, the non-negative floor, equal evaluation sets, a correction that worsens accuracy, invalid API input, the report hash, and the absence of secret fields. They do not call the network.
+
+## 15. Docker
 
 ```bash
 docker compose up --build
 ```
 
-Open **http://localhost:8080**. Click **Sync Elexon** or wait for the automatic import trigger. The import fetches ~18 k WINDFOR records and ~1.5 k FUELHH WIND records from the live Elexon API (typically 10–20 s). The dashboard becomes interactive once the import completes.
+Open http://localhost:8080. The first import pulls the two Elexon windows. `docker compose down` keeps the cache volume. `docker compose down -v` deletes it.
 
-```bash
-docker compose down          # stop containers (cache volume is preserved)
-docker compose down -v       # stop and delete cache volume
-```
+A `docker compose up --build` was started in this session and did not finish, so container health was **not** reconfirmed here. The compose file is unchanged: API on the internal network, Nginx publishing port 8080.
 
-### Local dev (no Docker)
+## 16. Vercel
 
-**Backend** — Python 3.12+:
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-CACHE_FILE=./data/elexon-january-2026.json uvicorn app.main:app --reload --port 8000
-```
+`vercel.json` routes `/api/*` to the FastAPI service and everything else to the Vite service. The public site is https://n8q4x2-elexon-wind.vercel.app/
 
-**Frontend** — Node 22+:
-```bash
-cd frontend
-npm install
-npm run dev         # Vite dev server at http://localhost:5173
-```
+On Vercel, `VERCEL` selects `/tmp` for the snapshot and makes `/api/refresh` synchronous, because a background task would be dropped when the function returns. Instances do not share `/tmp`. A cold start fetches Elexon on the analytical request. Pushing `main` deploys only if the GitHub project is already connected. This document does not claim a new deployment was observed.
 
-The Vite config proxies `/api` to `localhost:8000`.
+## 17. Engineering tradeoffs
 
----
+- The snapshot is a local JSON file, not a database. That matches a single-month public extract and avoids inventing shared infrastructure that Vercel instances would not share anyway.
+- Scenario evaluation is recomputed per request. It is deterministic for a given snapshot hash. A cross-instance cache would need a store this pilot does not have.
+- The UI keeps one date and one cutoff for Overview, explorer, workbench, and the risk brief, so those views cannot silently disagree.
+- Hourly points are connected on the chart only as a visual. The metrics still ignore unmatched half-hours.
 
-## API reference
+## 18. Known limitations
 
-| Method | Route | Description |
-|--------|-------|-------------|
-| `GET` | `/api/health` | Liveness check + cache presence |
-| `GET` | `/api/status` | Import progress, last-synced timestamp, error string |
-| `POST` | `/api/refresh` | Trigger Elexon import (background on Docker, blocking on Vercel) |
-| `GET` | `/api/dashboard?cutoff=09:50` | Full January analysis; `cutoff` accepts any `HH:MM` in `[00:00, 23:59]` |
-| `GET` | `/api/backtest?cutoff=09:50` | Walk-forward bias-correction backtest across all 31 decision days |
-| `GET` | `/api/risk-brief?cutoff=09:50&date=2026-01-31` | Per-day risk brief (forecast position, prior tendency, large misses) |
+- One calendar month.
+- Hourly forecasts versus half-hourly settlement. Exact matches only.
+- Exploratory baselines. The January error reduction on the 648-row set is not a validated forward strategy.
+- No demand, price, or portfolio series. No trading order, procurement quantity, or financial saving.
+- Realized error is known only after delivery.
+- No confidence interval.
+- National GB wind only, not a single site.
 
-Interactive docs: `http://localhost:8000/docs`
+## 19. AI-assisted development
 
----
+Earlier project work used Google Gemini in the Antigravity IDE for research, implementation help, tests, and documentation. The scenario workbench, tests, CI workflow, this README, and `RECORDING_SCRIPT.md` were implemented with Cursor’s coding agent. Figures in section 8 were recomputed from Elexon in this session. They are not model-invented market data.
 
-## Tests
+## Video demo
 
-```bash
-cd backend
-pip install -r requirements-dev.txt
-PYTHONPATH=. python -m pytest -v
-```
+The submission asks for an **unlisted** YouTube video recorded by the author. The speaking script is [`RECORDING_SCRIPT.md`](RECORDING_SCRIPT.md). Part 1 is a customer overview of at most 5 minutes. Part 2 is a tech-lead walkthrough. The local assignment text was truncated after “architecture, design, analysis, c”, so the script’s Part 2 follows that opening plus the design in this repo. This repository does not upload the video and does not contain a YouTube URL. Record it, upload it as Unlisted, and submit the link yourself.
 
-**47 tests, 5 modules** — all deterministic, no network calls, no test data files:
+## Screenshots
 
-| Module | What it covers |
-|--------|---------------|
-| `test_api.py` | Health endpoint, 503 when no cache, invalid cutoff rejection, no simulation mode, cache survives failed refresh, Vercel `/tmp` path |
-| `test_elexon.py` | Exact SOURCES parameters sent in HTTP requests, empty/malformed response → `UpstreamError`, WIND-only filter |
-| `test_domain.py` | Cutoff prevents look-ahead, revision ordering, BST/GMT timezone, prior-known MAE excludes future actuals, null not zero for unmatched periods |
-| `test_regression.py` | Hourly WINDFOR → 50% coverage, cutoff boundary (≤ inclusive), multiple revisions, empty inputs, negative generation rejection, late FUELHH publishTime |
-| `test_backtest.py` | Future-data leakage (day 0 has 0 pairs), FUELHH actual-publication timing, threshold guard (exactly 72 pairs), bias direction, non-negativity, same eval set, WINDFOR/FUELHH alignment |
+These images are the January dashboard from an earlier commit. They do not show the scenario workbench.
 
----
-
-## Deployment
-
-### Vercel (Services — single project)
-
-`vercel.json` uses Vercel's Services format: each directory is a standalone deployable unit, routed by top-level `rewrites`.
-
-| Route | Service | Notes |
-|-------|---------|-------|
-| `/api/*` | `backend` — FastAPI serverless | `maxDuration 60 s`, `memory 1024 MB` |
-| `/*` | `frontend` — Vite static CDN | SPA fallback to `index.html` |
-
-**No service bindings** — the React frontend calls `/api/*` from the browser (public rewrites handle routing); the FastAPI backend only calls Elexon externally. No server-to-server traffic between the two services.
-
-Vercel's `framework: "fastapi"` discovers the ASGI app at `backend/api/index.py` (within the service root). That shim adds `backend/` to `sys.path` and re-exports the FastAPI `app` object from `backend/app/main.py`.
-
-Two runtime adaptations in `backend/app/main.py` (guarded by `os.getenv("VERCEL")`, injected automatically):
-
-1. **Cache path** — writes to `/tmp` (only writable Lambda path) instead of `/app/data/`
-2. **Synchronous refresh** — awaits `refresh_data()` directly instead of `asyncio.create_task()`, which Vercel drops when the function returns its response
-
-> `/tmp` is shared only across warm Lambda instances. Cold starts trigger a fresh Elexon import on the first request.
-
-```bash
-npm install -g vercel
-vercel login
-vercel --prod          # run from repo root; follow prompts to link project
-```
-
-Or import via the Vercel dashboard — choose **"Import multi-service project"**, no environment variables required.
-
-### Heroku
-
-```bash
-heroku container:push web -a <app-name>
-heroku container:release web -a <app-name>
-```
-
-Uses the root `Dockerfile` which runs `vite build` and serves the output as FastAPI static files. Heroku dyno storage is ephemeral — the Elexon cache is lost on each restart. For production, move the cache to an external store (S3, Postgres).
-
----
-
-## Data sources
-
-Both datasets are from the [Elexon BMRS public API](https://bmrs.elexon.co.uk/api-documentation). No API key is required.
-
-| Dataset | Parameters | Records (Jan 2026) |
-|---------|-----------|-------------------|
-| [WINDFOR](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/WINDFOR/stream) | `publishDateTimeFrom=2026-01-01T00:00:00Z` `publishDateTimeTo=2026-02-01T00:00:00Z` | 18,104 |
-| [FUELHH](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/FUELHH/stream) | `settlementDateFrom=2026-01-02` `settlementDateTo=2026-02-02` → `fuelType=WIND` | 1,536 |
-
-**Why different parameter types?** WINDFOR is filtered by when forecasts were *published* (relevant for reconstructing the buyer's information set at cutoff). FUELHH is filtered by *settlement date* (the delivery day), as that is how Elexon indexes measured generation.
-
-**50% forecast coverage:** WINDFOR publishes one forecast per hour, not per half-hour. For each 48-slot delivery day, 24 slots have a matched WINDFOR record; the other 24 remain `null`. This is a dataset characteristic — Windward leaves unmatched slots as `null` rather than interpolating.
-
----
-
-## Methodology
-
-| Concept | Implementation |
-|---------|---------------|
-| Decision cutoff | `ZoneInfo("Europe/London")` local time → UTC; BST-aware for future months |
-| As-of forecast selection | Latest `WINDFOR` revision with `publishTime ≤ cutoff` per delivery `startTime` |
-| Actual generation | Latest `FUELHH` WIND revision per `startTime` (retrospective evaluation) |
-| Prior-known MAE | Trailing MAE using only FUELHH revisions published `≤ cutoff` at time of decision |
-| Error sign | `forecast − actual`; positive = overforecast = more wind assumed than delivered |
-| Metrics | MAE, RMSE, bias, P90 absolute error, overforecast rate — matched pairs only |
-| Match | Exact UTC `startTime` equality; no interpolation or zero-fill |
-
-### Walk-forward bias-correction backtest
-
-For each decision day D, the mean signed error is computed from all prior days D' < D where:
-1. A WINDFOR forecast existed at D''s cutoff for the relevant delivery startTime
-2. The FUELHH actual for that startTime was published **at or before D's cutoff** (strictly causal — the buyer on day D can see this actual)
-
-The adjusted forecast is `max(0, raw_forecast − mean_signed_error)` — clamped to zero so it cannot go negative.
-
-**Minimum threshold:** At least 72 matched (forecast, causal-actual) pairs from prior days must exist before an adjusted estimate is shown. Days below this threshold display "Insufficient history".
-
-**Evaluation:** Both original and adjusted forecasts are evaluated on the **same matched pairs** (where both the as-of forecast and retrospective FUELHH actual are available on day D). This ensures the comparison is apples-to-apples.
-
-**WINDFOR/FUELHH alignment sensitivity:** WINDFOR is published at hourly granularity; FUELHH is half-hourly. Approximately 50% of half-hourly delivery slots have no corresponding WINDFOR entry. All backtest computations operate on the matched subset only — unmatched half-hours are excluded from training and evaluation. This is explicitly noted in every API response and UI panel.
-
-> **Label:** All backtest results are marked *exploratory retrospective analysis*. The mean bias is estimated from a single month of data and has high sampling uncertainty. This does not constitute a proven forward strategy, a prediction interval, or a financial saving estimate.
-
-### Decision risk brief
-
-For a given decision date and cutoff, the risk brief surfaces:
-- **Forecast position:** mean WINDFOR value visible at cutoff, data freshness (hours between latest publish and cutoff), and coverage
-- **Prior tendency:** overforecast bias computed from all earlier days where the FUELHH actual was published at or before the target day's cutoff
-- **Recent large misses:** days in the past 7 where MAE exceeded 1.5× the historical average, with an explanation of what to watch for
-
-The brief explicitly does **not** compute demand, thermal generation requirements, or wholesale purchase volumes — those inputs were not provided.
-
-### Assumptions and limitations
-
-| Assumption | Detail |
-|------------|--------|
-| January 2026 only | The analysis period is fixed; extending requires re-fetching Elexon data |
-| GB national wind only | WINDFOR and FUELHH cover aggregate GB wind, not individual assets or zones |
-| WINDFOR hourly resolution | ~50% of half-hourly slots have no direct WINDFOR entry; unmatched slots are null |
-| Single-month bias estimate | 31 days is a small sample; sampling uncertainty in mean bias is high |
-| Retrospective actuals | FUELHH actuals may be revised; the tool uses the latest available revision as the evaluation reference |
-| No demand or price data | Procurement exposure cannot be calculated without a separate demand or position file |
-
----
-
-*AI tools used during development: Google Gemini (Antigravity IDE) — for domain research, code generation assistance, test design, and documentation.*
+<img width="1464" height="834" alt="Overview" src="https://github.com/user-attachments/assets/37f395d7-9a71-4912-913a-c87de3481a15" />
+<img width="1464" height="834" alt="Forecast explorer" src="https://github.com/user-attachments/assets/e4decc74-e950-497b-86fe-0b4ceb277684" />
