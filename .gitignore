@@ -1,0 +1,10 @@
+node_modules/
+dist/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.env
+backend/data/
+backend/.venv/
+.DS_Store
+DEMO_SCRIPT.md
