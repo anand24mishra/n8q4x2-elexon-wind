@@ -108,6 +108,7 @@ async def start_refresh():
         # when the function returns its response.  Await directly so the /tmp
         # cache is fully written before we return.
         if state.get("status") != "loading":
+            state.update(status="loading", done=0, total=2, error=None)
             await refresh_data()
     else:
         # Docker / local dev: genuine background task so the endpoint returns
@@ -122,6 +123,14 @@ async def start_refresh():
 @app.get("/api/dashboard")
 async def dashboard(cutoff: str = Query(default="09:50", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")):
     data = cached_data()
+    if data is None and _IS_VERCEL:
+        # On Vercel each Lambda instance has its own /tmp.  A prior POST
+        # /api/refresh may have populated it in a *different* container, so
+        # this instance cannot rely on that cache.  Fetch Elexon directly here
+        # so this invocation is completely self-contained.
+        state.update(status="loading", done=0, total=2, error=None)
+        await refresh_data()
+        data = cached_data()
     if data is None:
         raise HTTPException(503, detail="Elexon January 2026 source data not imported yet. Please sync Elexon.")
     result = analyze(data["actual"], data["forecast"], cutoff=cutoff)
