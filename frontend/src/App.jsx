@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import ScenarioWorkbench from './ScenarioWorkbench';
 
-const fmt = (value, digit = 0) => value == null ? 'Not available' : new Intl.NumberFormat('en-GB', { maximumFractionDigits: digit, minimumFractionDigits: digit }).format(value);
-const dayFormat = (dateString, opts = {}) => new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC', ...opts }).format(new Date(`${dateString}T12:00:00Z`));
-const timeFormat = dateTime => dateTime ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/London' }).format(new Date(dateTime)) : 'Not published';
+export const fmt = (value, digit = 0) => value == null ? 'Not available' : new Intl.NumberFormat('en-GB', { maximumFractionDigits: digit, minimumFractionDigits: digit }).format(value);
+export const dayFormat = (dateString, opts = {}) => new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC', ...opts }).format(new Date(`${dateString}T12:00:00Z`));
+export const timeFormat = dateTime => dateTime ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/London' }).format(new Date(dateTime)) : 'Not published';
 const Icons = {
   wind: <><path d="M3 8h11a3 3 0 1 0-3-3" /><path d="M2 12h17a3 3 0 1 1-3 3" /><path d="M4 16h6a3 3 0 1 1-3 3" /></>,
   chart: <><path d="M4 19V5" /><path d="M4 19h16" /><path d="m8 15 4-5 3 2 5-7" /></>,
@@ -19,10 +20,11 @@ const Icons = {
   shield: <><path d="M12 2 4 5v6c0 6 4 9 8 11 4-2 8-5 8-11V5z" /><path d="m9 12 2 2 4-4" /></>,
   zap: <><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" /></>,
   alert: <><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><path d="M12 9v4M12 17h.01" /></>,
+  layers: <><path d="m12 2 10 5-10 5L2 7z" /><path d="m2 12 10 5 10-5" /><path d="m2 17 10 5 10-5" /></>,
 };
-function Icon({ name, size = 18, className = '' }) { return <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{Icons[name]}</svg>; }
+export function Icon({ name, size = 18, className = '' }) { return <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{Icons[name]}</svg>; }
 
-function lineSections(rows, field, x, y, maxGap = 1) {
+export function lineSections(rows, field, x, y, maxGap = 1) {
   const sections = []; let current = []; let lastIdx = -1;
   for (let i = 0; i < rows.length; i++) {
     if (rows[i][field] == null) continue;
@@ -63,7 +65,9 @@ function ForecastChart({ rows, title = 'Wind generation profile', compact = fals
         <span>MAE <b>{fmt(rows[validIndex].actual)} MW</b></span>
       </> : <>
         <span>Forecast (hourly) <b>{rows[validIndex].forecast != null ? `${fmt(rows[validIndex].forecast)} MW` : <i style={{ color: '#8da5af', fontStyle: 'normal' }}>No half-hr WINDFOR</i>}</b></span>
-        <span>Actual (half-hourly) <b>{rows[validIndex].actual != null ? `${fmt(rows[validIndex].actual)} MW` : 'Not published'}</b></span>
+        <span>Forecast published <b>{rows[validIndex].publishTime ? timeFormat(rows[validIndex].publishTime) : 'Not published'}</b></span>
+        <span>Actual (half-hourly) <b>{rows[validIndex].actual != null ? `${fmt(rows[validIndex].actual)} MW` : 'Missing'}</b></span>
+        <span>Missing-data status <b>{rows[validIndex].forecast == null ? 'Hourly forecast not observed at this half-hour' : rows[validIndex].actual == null ? 'Actual missing' : 'Matched'}</b></span>
         {rows[validIndex].forecast != null && rows[validIndex].actual != null && <span>Error (fc − act) <b className={rows[validIndex].forecast - rows[validIndex].actual > 0 ? 'pos-error' : 'neg-error'}>{rows[validIndex].forecast - rows[validIndex].actual > 0 ? '+' : ''}{fmt(rows[validIndex].forecast - rows[validIndex].actual)} MW</b></span>}
       </>}
     </div>}
@@ -71,7 +75,7 @@ function ForecastChart({ rows, title = 'Wind generation profile', compact = fals
 }
 
 function MetricCard({ label, value, unit, detail, chip, positive = false }) { return <div className="metric-card"><div className="metric-heading">{label}<Icon name="info" size={14} /></div><div className="metric-value">{value}<small>{unit}</small></div><div className="metric-foot"><span className={positive ? 'positive' : ''}>{chip}</span>{detail}</div></div>; }
-function Tag({ children, tone = 'neutral' }) { return <span className={'tag ' + tone}>{children}</span>; }
+export function Tag({ children, tone = 'neutral' }) { return <span className={'tag ' + tone}>{children}</span>; }
 
 // ── Backtest comparison bar chart ──────────────────────────────────────────
 function BacktestBars({ daily }) {
@@ -144,7 +148,9 @@ export default function App() {
   const [btBusy, setBtBusy] = useState(false);
   const [riskBrief, setRiskBrief] = useState(null);
   const [rbBusy, setRbBusy] = useState(false);
-  const [riskDate, setRiskDate] = useState('2026-01-31');
+  const [btError, setBtError] = useState(null);
+  const [rbError, setRbError] = useState(null);
+  const [strategy, setStrategy] = useState('all');
 
   useEffect(() => {
     let subscribed = true;
@@ -152,26 +158,39 @@ export default function App() {
     poll(); const timer = setInterval(poll, 2200); return () => { subscribed = false; clearInterval(timer); };
   }, []);
   useEffect(() => {
-    let alive = true; setBusy(true); setError(null);
-    fetch(`/api/dashboard?cutoff=${encodeURIComponent(cutoff)}`).then(async r => { const body = await r.json(); if (!r.ok) throw new Error(body.detail || 'Could not load dashboard'); return body; }).then(j => { if (alive) setData(j); }).catch(e => { if (alive) { setData(null); setError(e.message); } }).finally(() => { if (alive) setBusy(false); });
-    return () => { alive = false; };
+    const controller = new AbortController();
+    let alive = true;
+    setBusy(true);
+    setError(null);
+    fetch(`/api/dashboard?cutoff=${encodeURIComponent(cutoff)}`, { signal: controller.signal })
+      .then(async r => { const body = await r.json(); if (!r.ok) throw new Error(body.detail || 'Could not load dashboard'); return body; })
+      .then(j => { if (alive) setData(j); })
+      .catch(e => { if (!alive || e.name === 'AbortError') return; setData(null); setError(e.message); })
+      .finally(() => { if (alive) setBusy(false); });
+    return () => { alive = false; controller.abort(); };
   }, [cutoff, revision]);
 
   // Load backtest when tab is opened
   useEffect(() => {
-    if (tab !== 'backtest' || !data) return;
-    let alive = true; setBtBusy(true);
-    fetch(`/api/backtest?cutoff=${encodeURIComponent(cutoff)}`).then(async r => { const body = await r.json(); if (!r.ok) throw new Error(body.detail || 'Backtest failed'); return body; }).then(j => { if (alive) setBacktest(j); }).catch(() => { }).finally(() => { if (alive) setBtBusy(false); });
-    return () => { alive = false; };
+    if (tab !== 'backtest' || !data) return undefined;
+    const controller = new AbortController();
+    let alive = true;
+    setBtBusy(true);
+    setBtError(null);
+    fetch(`/api/backtest?cutoff=${encodeURIComponent(cutoff)}`, { signal: controller.signal }).then(async r => { const body = await r.json(); if (!r.ok) throw new Error(body.detail || 'Backtest failed'); return body; }).then(j => { if (alive) setBacktest(j); }).catch(e => { if (!alive || e.name === 'AbortError') return; setBtError(e.message); }).finally(() => { if (alive) setBtBusy(false); });
+    return () => { alive = false; controller.abort(); };
   }, [tab, cutoff, revision]);
 
   // Load risk brief when tab is opened or date changes
   useEffect(() => {
-    if (tab !== 'risk' || !data) return;
-    let alive = true; setRbBusy(true);
-    fetch(`/api/risk-brief?cutoff=${encodeURIComponent(cutoff)}&date=${riskDate}`).then(async r => { const body = await r.json(); if (!r.ok) throw new Error(body.detail || 'Risk brief failed'); return body; }).then(j => { if (alive) setRiskBrief(j); }).catch(() => { }).finally(() => { if (alive) setRbBusy(false); });
-    return () => { alive = false; };
-  }, [tab, cutoff, revision, riskDate]);
+    if (tab !== 'risk' || !data) return undefined;
+    const controller = new AbortController();
+    let alive = true;
+    setRbBusy(true);
+    setRbError(null);
+    fetch(`/api/risk-brief?cutoff=${encodeURIComponent(cutoff)}&date=${selectedDay}`, { signal: controller.signal }).then(async r => { const body = await r.json(); if (!r.ok) throw new Error(body.detail || 'Risk brief failed'); return body; }).then(j => { if (alive) setRiskBrief(j); }).catch(e => { if (!alive || e.name === 'AbortError') return; setRbError(e.message); }).finally(() => { if (alive) setRbBusy(false); });
+    return () => { alive = false; controller.abort(); };
+  }, [tab, cutoff, revision, selectedDay]);
 
   const refresh = async () => { try { const r = await fetch('/api/refresh', { method: 'POST' }); if (!r.ok) throw new Error('Could not start Elexon refresh'); setStatus(await r.json()); } catch (e) { setError(e.message); } };
   const report = useMemo(() => data?.daily.find(d => d.decisionDate === selectedDay) || data?.daily[0], [data, selectedDay]);
@@ -182,6 +201,7 @@ export default function App() {
 
   const navItems = [
     ['overview', 'grid', 'Overview'],
+    ['workbench', 'layers', 'Scenario workbench'],
     ['explorer', 'chart', 'Forecast explorer'],
     ['accuracy', 'shield', 'Accuracy review'],
     ['backtest', 'zap', 'Bias backtest'],
@@ -189,8 +209,8 @@ export default function App() {
     ['method', 'file', 'Methodology'],
   ];
 
-  const pageTitle = { overview: 'Clarity before commitment.', explorer: 'Explore each delivery day.', accuracy: 'See where forecasts missed.', backtest: 'Walk-forward bias correction.', risk: 'Decision risk brief.', method: 'Transparent by design.' };
-  const pageSub = { overview: 'Reconstruct the wind forecast visible when your purchasing decision had to be made.', explorer: 'Inspect the timestamp-level forecast, actual generation and published revision.', accuracy: 'Evaluate historical forecast bias, magnitude of errors and observation coverage.', backtest: 'Exploratory retrospective: what would a simple mean-bias adjustment have changed?', risk: 'Summarise the observable forecast position and historical tendencies for a specific decision day.', method: 'Every calculation is traceable to publication timestamps and matching generation periods.' };
+  const pageTitle = { overview: 'Clarity before commitment.', workbench: 'Day-ahead scenario workbench.', explorer: 'Explore each delivery day.', accuracy: 'See where forecasts missed.', backtest: 'Walk-forward bias correction.', risk: 'Decision risk brief.', method: 'Transparent by design.' };
+  const pageSub = { overview: 'Reconstruct the wind forecast visible when your purchasing decision had to be made.', workbench: 'Compare the raw forecast with two causal bias corrections using one shared decision date and cutoff.', explorer: 'Inspect the timestamp-level forecast, actual generation and published revision.', accuracy: 'Evaluate historical forecast bias, magnitude of errors and observation coverage.', backtest: 'Exploratory retrospective: what would a simple mean-bias adjustment have changed?', risk: 'Summarise the observable forecast position and historical tendencies for a specific decision day.', method: 'Every calculation is traceable to publication timestamps and matching generation periods.' };
 
   const btSummary = backtest?.daysWithEnoughHistory > 0 ? backtest : null;
 
@@ -227,9 +247,12 @@ export default function App() {
           {tab === 'accuracy' && <><div className="diagnostics-strip"><div><span>RMSE</span><strong>{fmt(data.metrics.rmseMw)} MW</strong></div><div><span>Overforecast frequency</span><strong>{fmt(data.metrics.overforecastRatePct, 1)}%</strong></div><div><span>Net matched energy error</span><strong>{fmt(data.metrics.netEnergyErrorMWh)} MWh</strong></div><div><span>Actual generation coverage</span><strong>{fmt(100 * data.metrics.actualPeriods / data.metrics.expectedPeriods, 1)}% ({data.metrics.actualPeriods}/{data.metrics.expectedPeriods} half-hours)</strong></div></div><section className="surface chart-card fullchart"><div className="surface-head"><div><div className="section-eyebrow">ERROR BY DECISION DAY</div><h2>Magnitude of forecasting uncertainty</h2><p>Daily mean absolute error and P90 absolute error in MW, based only on matched timestamps.</p></div></div><div className="legend"><span><i className="key-actual" />MAE</span><span><i className="key-forecast" />P90 absolute error</span></div><ForecastChart rows={trend} compact title="Daily MAE and P90 absolute error" /></section><section className="surface daily-table"><div className="surface-head"><div><div className="section-eyebrow">COMPLETE PERIOD REVIEW</div><h2>31 decision days, side by side</h2></div></div><DailyTable daily={data.daily} selected={report.decisionDate} onChoose={d => { setSelectedDay(d); setTab('explorer'); }} /></section></>}
           {tab === 'explorer' && <section className="surface daily-table"><div className="surface-head"><div><div className="section-eyebrow">AUDIT TRAIL</div><h2>Every half-hour timestamp</h2><p>Values and selected publication time are preserved; missing observations remain blank.</p></div><Tag>{periods.filter(x => x.error != null).length} / 48 settlement periods matched (hourly WINDFOR)</Tag></div><div className="table-scroll"><table><thead><tr><th>Delivery time (UK)</th><th>Selected publish time (UK)</th><th className="number">Forecast (hourly MW)</th><th className="number">Actual (half-hourly MW)</th><th className="number">Error (MW)</th></tr></thead><tbody>{periods.map(p => <tr key={p.startTime}><td>{timeFormat(p.startTime)}</td><td>{timeFormat(p.publishTime)}</td><td className="number">{p.forecast == null ? <span className="na-text" title="WINDFOR publishes hourly; no half-hour forecast published">—</span> : fmt(p.forecast)}</td><td className="number">{p.actual == null ? '—' : fmt(p.actual)}</td><td className={'number ' + (p.error > 0 ? 'pos-error' : p.error < 0 ? 'neg-error' : '')}>{p.error == null ? '—' : `${p.error > 0 ? '+' : ''}${fmt(p.error)}`}</td></tr>)}</tbody></table></div></section>}
 
+          {tab === 'workbench' && <ScenarioWorkbench cutoff={cutoff} selectedDay={selectedDay} onSelectDay={setSelectedDay} onCutoffChange={setCutoff} availableDays={data.daily} revision={revision} strategy={strategy} onStrategyChange={setStrategy} />}
+
           {/* ── Walk-forward Bias Backtest ── */}
           {tab === 'backtest' && <div className="backtest-shell">
             <div className="notice" style={{ marginTop: 0, marginBottom: 18 }}><Icon name="info" size={17} /><span><strong>Exploratory retrospective:</strong> {backtest?.disclaimer ? backtest.disclaimer.replace(/^Exploratory retrospective (analysis )?only\.\s*/i, '') : "The mean bias is estimated from strictly prior days' data that would have been observable at that cutoff. This does not represent a proven forward strategy, a prediction interval, or a financial saving estimate."}</span></div>
+            {btError && <div className="notice error"><Icon name="info" /><span>{btError}</span></div>}
             {btBusy && <div className="bt-loading"><Icon name="refresh" size={18} />Computing walk-forward backtest…</div>}
             {!btBusy && backtest && <>
               <div className="bt-summary-grid">
@@ -284,10 +307,11 @@ export default function App() {
           {tab === 'risk' && <div className="risk-shell">
             <div className="risk-date-bar">
               <span className="filter-label">DECISION DATE</span>
-              <select value={riskDate} onChange={e => setRiskDate(e.target.value)} aria-label="Select decision date for risk brief">
+              <select value={selectedDay} onChange={e => setSelectedDay(e.target.value)} aria-label="Select decision date for risk brief">
                 {data.daily.map(d => <option key={d.decisionDate} value={d.decisionDate}>{dayFormat(d.decisionDate, { year: 'numeric' })} decision</option>)}
               </select>
             </div>
+            {rbError && <div className="notice error"><Icon name="info" /><span>{rbError}</span></div>}
             {rbBusy && <div className="bt-loading"><Icon name="refresh" size={18} />Loading risk brief…</div>}
             {!rbBusy && riskBrief && <>
               <div className="notice" style={{ marginTop: 8, marginBottom: 18 }}><Icon name="info" size={17} /><span>{riskBrief.disclaimer}</span></div>
@@ -338,7 +362,7 @@ export default function App() {
             </>}
           </div>}
 
-          {tab === 'method' && <div className="method-grid"><section className="surface methodology"><div className="section-eyebrow">POINT-IN-TIME LOGIC</div><h2>What could the buyer actually know?</h2><div className="steps"><div><b>01</b><span><strong>Anchor the decision</strong>Consider decision dates 1 to 31 January 2026. Each decision refers to next-day delivery, 2 January through 1 February.</span></div><div><b>02</b><span><strong>Reconstruct the forecast</strong>Choose the most recently published WINDFOR value for each target timestamp with <code>publishTime ≤ cutoff</code>.</span></div><div><b>03</b><span><strong>Compare with observed wind</strong>Join the forecast to <code>FUELHH</code> with <code>fuelType = WIND</code> on identical <code>startTime</code>.</span></div><div><b>04</b><span><strong>Quantify what is covered</strong>Calculate MAE, RMSE, bias and P90 on matched observations only. No interpolation and no zero-fill.</span></div><div><b>05</b><span><strong>Walk-forward backtest (exploratory)</strong>For each day with ≥72 prior matched pairs, compute mean signed error from strictly prior days and subtract it from the raw forecast. Evaluate on the same matched pairs. Label as retrospective only.</span></div><div><b>06</b><span><strong>Risk brief</strong>Summarise the forecast position and prior error tendency visible at the chosen cutoff. No demand, price, or procurement volume is inferred.</span></div></div></section><section className="surface methodology"><div className="section-eyebrow">IMPORTANT SCOPE NOTES</div><h2>Not a trading instruction</h2><p>The application estimates national wind forecast performance, not a client's net procurement need. It deliberately does not include customer demand, owned-generation positions, prices, hedges or trading constraints.</p><p>WINDFOR forecasts may represent fewer target timestamps than FUELHH actuals. Coverage counts the exact half-hourly matches; missing forecast intervals are not filled.</p><p>Daily "prior known MAE" uses only earlier matched observations with FUELHH publish timestamps at or before that day's cutoff. It is a historical error indicator, not a guaranteed confidence bound.</p><p>All energy quantities use 0.5 hours × MW per matched settlement period. Net error means forecast minus actual; positive error implies potential wind shortfall, not an independently calculated power purchase order.</p><p>The January error summary is a retrospective diagnostic. It must not be passed off as a prediction interval available to a buyer at an earlier January decision time.</p><p><strong>WINDFOR/FUELHH hourly alignment:</strong> WINDFOR publishes at hourly granularity; FUELHH is half-hourly. Pairs are joined on exact startTime equality — approximately 50% of half-hourly FUELHH slots have no corresponding WINDFOR entry and are excluded from all computations. The bias backtest trains and evaluates only on slots where both datasets provide a value.</p><div className="source-links"><a href="https://data.elexon.co.uk/bmrs/api/v1/datasets/WINDFOR/stream?publishDateTimeFrom=2026-01-01T00%3A00%3A00Z&publishDateTimeTo=2026-02-01T00%3A00%3A00Z" target="_blank" rel="noreferrer">WINDFOR exact source request ↗</a><a href="https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELHH/stream?settlementDateFrom=2026-01-02&settlementDateTo=2026-02-02" target="_blank" rel="noreferrer">FUELHH exact source request ↗</a></div></section></div>}
+          {tab === 'method' && <div className="method-grid"><section className="surface methodology"><div className="section-eyebrow">POINT-IN-TIME LOGIC</div><h2>What could the buyer actually know?</h2><div className="steps"><div><b>01</b><span><strong>Anchor the decision</strong>Consider decision dates 1 to 31 January 2026. Each decision refers to next-day delivery, 2 January through 1 February.</span></div><div><b>02</b><span><strong>Reconstruct the forecast</strong>Choose the most recently published WINDFOR value for each target timestamp with <code>publishTime ≤ cutoff</code>.</span></div><div><b>03</b><span><strong>Compare with observed wind</strong>Join the forecast to <code>FUELHH</code> with <code>fuelType = WIND</code> on identical <code>startTime</code>.</span></div><div><b>04</b><span><strong>Quantify what is covered</strong>Calculate MAE, RMSE, bias and P90 on matched observations only. No interpolation and no zero-fill.</span></div><div><b>05</b><span><strong>Walk-forward backtest (exploratory)</strong>For each day with ≥72 prior matched pairs, compute mean signed error from strictly prior days and subtract it from the raw forecast. Evaluate on the same matched pairs. Label as retrospective only.</span></div><div><b>06</b><span><strong>Risk brief</strong>Summarise the forecast position and prior error tendency visible at the chosen cutoff. No demand, price, or procurement volume is inferred.</span></div><div><b>07</b><span><strong>Scenario workbench</strong>Hold the decision date and cutoff fixed, then compare the raw forecast with expanding and rolling 7-day corrections. Adjustments stay blank below 72 causal pairs.</span></div></div></section><section className="surface methodology"><div className="section-eyebrow">IMPORTANT SCOPE NOTES</div><h2>Not a trading instruction</h2><p>The application estimates national wind forecast performance, not a client's net procurement need. It deliberately does not include customer demand, owned-generation positions, prices, hedges or trading constraints.</p><p>WINDFOR forecasts may represent fewer target timestamps than FUELHH actuals. Coverage counts the exact half-hourly matches; missing forecast intervals are not filled.</p><p>Daily "prior known MAE" uses only earlier matched observations with FUELHH publish timestamps at or before that day's cutoff. It is a historical error indicator, not a guaranteed confidence bound.</p><p>All energy quantities use 0.5 hours × MW per matched settlement period. Net error means forecast minus actual; positive error implies potential wind shortfall, not an independently calculated power purchase order.</p><p>The January error summary is a retrospective diagnostic. It must not be passed off as a prediction interval available to a buyer at an earlier January decision time.</p><p><strong>WINDFOR/FUELHH hourly alignment:</strong> WINDFOR publishes at hourly granularity; FUELHH is half-hourly. Pairs are joined on exact startTime equality — approximately 50% of half-hourly FUELHH slots have no corresponding WINDFOR entry and are excluded from all computations. The bias backtest trains and evaluates only on slots where both datasets provide a value.</p><div className="source-links"><a href="https://data.elexon.co.uk/bmrs/api/v1/datasets/WINDFOR/stream?publishDateTimeFrom=2026-01-01T00%3A00%3A00Z&publishDateTimeTo=2026-02-01T00%3A00%3A00Z" target="_blank" rel="noreferrer">WINDFOR exact source request ↗</a><a href="https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELHH/stream?settlementDateFrom=2026-01-02&settlementDateTo=2026-02-02" target="_blank" rel="noreferrer">FUELHH exact source request ↗</a></div></section></div>}
           <div className="footer-context"><Icon name="shield" size={15} /><span>Source: Elexon BMRS WINDFOR and FUELHH datasets. Latest import: {data.lastSynced ? timeFormat(data.lastSynced) : 'Not applicable'}. No demand or market price series included.</span></div>
         </>}
       </div>
