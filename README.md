@@ -4,9 +4,9 @@ A decision-support tool for UK electricity procurement teams. Windward answers a
 
 The platform pulls live data from the Elexon BMRS public API, reconstructs point-in-time forecast snapshots for each half-hour of January 2026, and delivers interactive accuracy analytics without relying on pre-computed or simulated values.
 
-**Live app:** _deploy to Vercel or Heroku and add the URL here_  
+**Live app:** https://n8q4x2-elexon-wind.vercel.app/
 **Stack:** React 19 · Vite 7 · FastAPI · Python 3.12 · HTTPX · Nginx · Docker Compose  
-**Data:** Elexon BMRS — WINDFOR (forecast) and FUELHH (actuals), January 2026
+**Data:** Elexon BMRS | WINDFOR (forecast) and FUELHH (actuals), January 2026
 
 ---
 
