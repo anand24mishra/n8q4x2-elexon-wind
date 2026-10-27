@@ -22,13 +22,18 @@ const Icons = {
 };
 function Icon({ name, size = 18, className = '' }) { return <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{Icons[name]}</svg>; }
 
-function lineSections(rows, field, x, y) {
-  const sections = []; let current = [];
+function lineSections(rows, field, x, y, maxGap = 1) {
+  const sections = []; let current = []; let lastIdx = -1;
   for (let i = 0; i < rows.length; i++) {
-    if (rows[i][field] == null) { if (current.length) sections.push(current); current = []; continue; }
+    if (rows[i][field] == null) continue;
+    if (lastIdx !== -1 && (i - lastIdx) > maxGap) {
+      if (current.length > 1) sections.push(current);
+      current = [];
+    }
     current.push(`${x(i)},${y(rows[i][field])}`);
+    lastIdx = i;
   }
-  if (current.length) sections.push(current);
+  if (current.length > 1) sections.push(current);
   return sections;
 }
 function ForecastChart({ rows, title = 'Wind generation profile', compact = false }) {
@@ -39,17 +44,29 @@ function ForecastChart({ rows, title = 'Wind generation profile', compact = fals
   const y = v => top + (1 - v / max) * (H - top - bottom);
   const validIndex = active != null && rows[active] ? active : null;
   const precision = Math.max(1, Math.floor(rows.length / 6));
+  const fcMaxGap = compact ? 1 : 2;
   return <div className={'chart-wrap ' + (compact ? 'smallchart' : '')}>
     <svg className="line-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={compact ? `${title} in MW` : `${title}: actual generation versus forecast, in MW`} onMouseLeave={() => setActive(null)}>
       {Array.from({ length: 5 }, (_, i) => <g key={i}><line x1={left} x2={W - right} y1={y(max * i / 4)} y2={y(max * i / 4)} stroke="#e6edf0" strokeDasharray="4 5" /><text x={left - 12} y={y(max * i / 4) + 4} textAnchor="end" className="axis">{compact ? fmt(max * i / 4) : `${fmt(max * i / 4 / 1000, 1)}k`}</text></g>)}
       {rows.map((row, i) => i % precision === 0 || i === rows.length - 1 ? <text key={i} x={x(i)} y={H - 12} textAnchor="middle" className="axis">{compact ? dayFormat(row.deliveryDate) : new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }).format(new Date(row.startTime))}</text> : null)}
-      {lineSections(rows, 'actual', x, y).map((points, i) => <polyline key={'a' + i} fill="none" stroke="#1bb7a4" strokeWidth="2.8" strokeLinejoin="round" strokeLinecap="round" points={points.join(' ')} />)}
-      {lineSections(rows, 'forecast', x, y).map((points, i) => <polyline key={'f' + i} fill="none" stroke="#f0a357" strokeWidth="2.8" strokeLinejoin="round" strokeLinecap="round" strokeDasharray="7 5" points={points.join(' ')} />)}
-      {rows.map((row, i) => <rect key={i} x={x(i) - (W - left - right) / Math.max(rows.length - 1, 1) / 2} y={top} width={(W - left - right) / Math.max(rows.length - 1, 1)} height={H - top - bottom} fill="transparent" onMouseEnter={() => setActive(i)}><title>{compact ? dayFormat(row.deliveryDate) : timeFormat(row.startTime)}, {compact ? 'P90 abs. error' : 'Forecast'}: {fmt(row.forecast)} MW, {compact ? 'MAE' : 'Actual'}: {fmt(row.actual)} MW</title></rect>)}
+      {lineSections(rows, 'actual', x, y, 1).map((points, i) => <polyline key={'a' + i} fill="none" stroke="#1bb7a4" strokeWidth="2.8" strokeLinejoin="round" strokeLinecap="round" points={points.join(' ')} />)}
+      {lineSections(rows, 'forecast', x, y, fcMaxGap).map((points, i) => <polyline key={'f' + i} fill="none" stroke="#f0a357" strokeWidth="2.6" strokeLinejoin="round" strokeLinecap="round" strokeDasharray="6 4" points={points.join(' ')} />)}
+      {rows.map((row, i) => row.forecast != null ? <circle key={'fm' + i} cx={x(i)} cy={y(row.forecast)} r={compact ? 2.5 : 3.5} fill="#f0a357" stroke="#ffffff" strokeWidth={compact ? 1 : 1.5} /> : null)}
+      {rows.map((row, i) => <rect key={i} x={x(i) - (W - left - right) / Math.max(rows.length - 1, 1) / 2} y={top} width={(W - left - right) / Math.max(rows.length - 1, 1)} height={H - top - bottom} fill="transparent" onMouseEnter={() => setActive(i)}><title>{compact ? `${dayFormat(row.deliveryDate)}: P90 ${fmt(row.forecast)} MW, MAE ${fmt(row.actual)} MW` : `${timeFormat(row.startTime)} — Forecast (hourly): ${row.forecast != null ? `${fmt(row.forecast)} MW` : 'No half-hr forecast'}, Actual (half-hourly): ${row.actual != null ? `${fmt(row.actual)} MW` : 'N/A'}`}</title></rect>)}
       {validIndex != null && <g><line x1={x(validIndex)} x2={x(validIndex)} y1={top} y2={H - bottom} stroke="#8da5af" strokeDasharray="3 4" />
         {['actual', 'forecast'].map(field => rows[validIndex][field] != null ? <circle key={field} cx={x(validIndex)} cy={y(rows[validIndex][field])} r="5" fill={field === 'actual' ? '#1bb7a4' : '#f0a357'} stroke="white" strokeWidth="2" /> : null)}</g>}
     </svg>
-    {validIndex != null && <div className="chart-tooltip"><strong>{compact ? dayFormat(rows[validIndex].deliveryDate) : timeFormat(rows[validIndex].startTime)}</strong><span>{compact ? 'P90 absolute error' : 'Forecast'} <b>{fmt(rows[validIndex].forecast)} MW</b></span><span>{compact ? 'MAE' : 'Actual'} <b>{fmt(rows[validIndex].actual)} MW</b></span></div>}
+    {validIndex != null && <div className="chart-tooltip">
+      <strong>{compact ? dayFormat(rows[validIndex].deliveryDate, { year: 'numeric' }) : timeFormat(rows[validIndex].startTime)}</strong>
+      {compact ? <>
+        <span>P90 abs. error <b>{fmt(rows[validIndex].forecast)} MW</b></span>
+        <span>MAE <b>{fmt(rows[validIndex].actual)} MW</b></span>
+      </> : <>
+        <span>Forecast (hourly) <b>{rows[validIndex].forecast != null ? `${fmt(rows[validIndex].forecast)} MW` : <i style={{ color: '#8da5af', fontStyle: 'normal' }}>No half-hr WINDFOR</i>}</b></span>
+        <span>Actual (half-hourly) <b>{rows[validIndex].actual != null ? `${fmt(rows[validIndex].actual)} MW` : 'Not published'}</b></span>
+        {rows[validIndex].forecast != null && rows[validIndex].actual != null && <span>Error (fc − act) <b className={rows[validIndex].forecast - rows[validIndex].actual > 0 ? 'pos-error' : 'neg-error'}>{rows[validIndex].forecast - rows[validIndex].actual > 0 ? '+' : ''}{fmt(rows[validIndex].forecast - rows[validIndex].actual)} MW</b></span>}
+      </>}
+    </div>}
   </div>;
 }
 
@@ -58,6 +75,7 @@ function Tag({ children, tone = 'neutral' }) { return <span className={'tag ' + 
 
 // ── Backtest comparison bar chart ──────────────────────────────────────────
 function BacktestBars({ daily }) {
+  const [hover, setHover] = useState(null);
   const eligible = daily.filter(d => d.hasEnoughHistory && d.originalMetrics?.maeMw != null);
   if (!eligible.length) return <p className="bt-empty">No days with sufficient training history (≥72 pairs).</p>;
   const maxVal = Math.max(...eligible.flatMap(d => [d.originalMetrics.maeMw, d.adjustedMetrics?.maeMw ?? 0])) * 1.15;
@@ -65,7 +83,6 @@ function BacktestBars({ daily }) {
   const barW = Math.max(4, (W - left - right) / eligible.length - 4);
   const x = i => left + (i + 0.5) * ((W - left - right) / eligible.length);
   const y = v => top + (1 - v / maxVal) * (H - top - bottom);
-  const [hover, setHover] = useState(null);
   return (
     <div className="chart-wrap">
       <svg className="line-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Original vs adjusted MAE by decision day" onMouseLeave={() => setHover(null)}>
@@ -89,7 +106,7 @@ function BacktestBars({ daily }) {
         <span>Original MAE <b>{fmt(eligible[hover].originalMetrics?.maeMw)} MW</b></span>
         <span>Adjusted MAE <b>{fmt(eligible[hover].adjustedMetrics?.maeMw)} MW</b></span>
         <span>Bias used <b>{eligible[hover].meanBiasMw != null ? `${eligible[hover].meanBiasMw > 0 ? '+' : ''}${fmt(eligible[hover].meanBiasMw)} MW` : '—'}</b></span>
-        <span>Training pairs <b>{eligible[hover].trainingPairs}</b></span>
+        <span>Training pairs <b>{eligible[hover].trainingPairs} (prior matched hourly)</b></span>
       </div>}
       <div className="legend" style={{ marginTop: 8 }}>
         <span><i className="key-forecast" />Original MAE</span>
@@ -197,29 +214,29 @@ export default function App() {
         {!data && <section className="empty-panel"><div className="empty-mark"><Icon name="wind" size={32} /></div><h2>{busy ? 'Loading forecast analysis…' : 'Import the January market record'}</h2><p>{busy ? 'Reconstructing historical as-of forecasts.' : 'Only original Elexon records are accepted. The first visit starts a historical import; if it fails, retry using Sync Elexon. No sample figures are substituted.'}</p><div className="empty-actions"><button className="primary-btn" onClick={refresh} disabled={status?.status === 'loading'}><Icon name="refresh" /> Import from Elexon</button></div>{error && <div className="empty-technical">{error}</div>}</section>}
         {data && <>
           {(tab === 'overview' || tab === 'accuracy') && <>
-            <div className="section-lead"><div><h2>{tab === 'overview' ? 'January at a glance' : 'Forecast accuracy, quantified'}</h2><span>31 decision days <span className="tiny-divider">·</span> {fmt(data.metrics.count)} matched timestamps <span className="tiny-divider">·</span> National wind</span></div><Tag>FORECAST − ACTUAL</Tag></div>
+            <div className="section-lead"><div><h2>{tab === 'overview' ? 'January at a glance' : 'Forecast accuracy, quantified'}</h2><span>31 decision days <span className="tiny-divider">·</span> {fmt(data.metrics.count)} matched settlement periods (hourly WINDFOR vs FUELHH) <span className="tiny-divider">·</span> National wind</span></div><Tag>FORECAST − ACTUAL</Tag></div>
             <div className="metrics-grid">
               <MetricCard label="Mean absolute error" value={fmt(data.metrics.maeMw)} unit="MW" chip="MAE" detail="Average absolute deviation" />
               <MetricCard label="Forecast bias" value={data.metrics.biasMw == null ? 'Not available' : `${data.metrics.biasMw > 0 ? '+' : ''}${fmt(data.metrics.biasMw)}`} unit="MW" chip="Signed error" detail="Positive means wind overforecast" />
               <MetricCard label="90th percentile error" value={fmt(data.metrics.p90AbsoluteErrorMw)} unit="MW" chip="P90 abs." detail="90% of paired errors at or below" />
-              <MetricCard label="Matched coverage" value={fmt(data.metrics.matchedCoveragePct, 1)} unit="%" chip={`${fmt(data.metrics.count)} / ${fmt(data.metrics.expectedPeriods)}`} detail="Both forecast and actual recorded" />
+              <MetricCard label="Matched coverage" value={fmt(data.metrics.matchedCoveragePct, 1)} unit="%" chip={`${fmt(data.metrics.count)} / ${fmt(data.metrics.expectedPeriods)} half-hours`} detail="Hourly WINDFOR matched to FUELHH (max 50% / 24 of 48 half-hours per day)" />
             </div>
           </>}
-          {(tab === 'overview' || tab === 'explorer') && <div className="two-col"><section className="surface chart-card"><div className="surface-head"><div><div className="section-eyebrow">DAY-AHEAD FORECAST PROFILE</div><h2>Forecast vs. outturn</h2><p>Delivery {dayFormat(report.deliveryDate, { year: 'numeric' })}, forecast visible by {cutoff} on {dayFormat(report.decisionDate)}</p></div><select className="day-select" value={report.decisionDate} onChange={e => setSelectedDay(e.target.value)} aria-label="Select January decision day">{data.daily.map(d => <option key={d.decisionDate} value={d.decisionDate}>{dayFormat(d.decisionDate, { year: 'numeric' })} decision</option>)}</select></div><div className="legend"><span><i className="key-actual" />Actual generation</span><span><i className="key-forecast" />Available forecast</span></div><ForecastChart rows={periods} /><div className="chart-under"><div><Icon name="clock" size={15} /> Latest forecast selected at or before decision cutoff</div><button onClick={showDetails}>See period details <Icon name="arrow" size={15} /></button></div></section><section className="surface decision-card"><div className="section-eyebrow">DECISION-DAY QUALITY</div><h2>{dayFormat(report.decisionDate, { year: 'numeric' })}</h2><div className="decision-sub">For power delivery on {dayFormat(report.deliveryDate, { year: 'numeric' })}</div><div className="daily-number">{fmt(report.maeMw)} <small>MW MAE</small></div><div className="daily-rule" /><div className="daily-stat"><span>Mean forecast bias</span><strong>{report.biasMw != null ? (report.biasMw > 0 ? '+' : '') + fmt(report.biasMw) + ' MW' : 'N/A'}</strong></div><div className="daily-stat"><span>Prior known MAE at cutoff</span><strong>{report.priorKnownMaeMw == null ? 'Unavailable' : `${fmt(report.priorKnownMaeMw)} MW (${report.priorKnownMatchedPeriods} periods)`}</strong></div><div className="daily-stat"><span>Matched time points</span><strong>{report.matched} / {report.expected}</strong></div><div className="daily-stat"><span>Forecast availability</span><strong>{fmt(report.coveragePct, 1)}%</strong></div><div className="daily-stat"><span>Net energy forecast error*</span><strong>{fmt(report.netEnergyErrorMWh)} MWh</strong></div><div className="availability-track"><div style={{ width: `${report.coveragePct}%` }} /></div><div className="interpretation"><Icon name="info" size={17} /><span>{report.count ? report.biasMw > 0 ? 'Positive bias: the selected forecast overstated observed wind on average, a potential under-procurement exposure.' : 'Negative or neutral bias: the forecast did not systematically overstate observed wind on this day.' : 'No paired timestamps for this day. No accuracy claim is possible.'} *On matched periods only; not a procurement order.</span></div></section></div>}
+          {(tab === 'overview' || tab === 'explorer') && <div className="two-col"><section className="surface chart-card"><div className="surface-head"><div><div className="section-eyebrow">DAY-AHEAD FORECAST PROFILE</div><h2>Forecast vs. outturn</h2><p>Delivery {dayFormat(report.deliveryDate, { year: 'numeric' })}, forecast visible by {cutoff} on {dayFormat(report.decisionDate)}</p></div><select className="day-select" value={report.decisionDate} onChange={e => setSelectedDay(e.target.value)} aria-label="Select January decision day">{data.daily.map(d => <option key={d.decisionDate} value={d.decisionDate}>{dayFormat(d.decisionDate, { year: 'numeric' })} decision</option>)}</select></div><div className="legend"><span><i className="key-actual" />Actual generation (half-hourly FUELHH)</span><span><i className="key-forecast" /><span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#f0a357', marginRight: 4, verticalAlign: 'middle' }} />Forecast (hourly WINDFOR markers)</span></div><ForecastChart rows={periods} /><div className="chart-under"><div><Icon name="clock" size={15} /> Hourly WINDFOR points connected; half-hour slots remain null (unimputed). As of {cutoff} UK cutoff.</div><button onClick={showDetails}>See period details <Icon name="arrow" size={15} /></button></div></section><section className="surface decision-card"><div className="section-eyebrow">DECISION-DAY QUALITY</div><h2>{dayFormat(report.decisionDate, { year: 'numeric' })}</h2><div className="decision-sub">For power delivery on {dayFormat(report.deliveryDate, { year: 'numeric' })}</div><div className="daily-number">{fmt(report.maeMw)} <small>MW MAE</small></div><div className="daily-rule" /><div className="daily-stat"><span>Mean forecast bias</span><strong>{report.biasMw != null ? (report.biasMw > 0 ? '+' : '') + fmt(report.biasMw) + ' MW' : 'N/A'}</strong></div><div className="daily-stat"><span>Prior known MAE at cutoff</span><strong>{report.priorKnownMaeMw == null ? 'Unavailable' : `${fmt(report.priorKnownMaeMw)} MW (${report.priorKnownMatchedPeriods} periods)`}</strong></div><div className="daily-stat"><span>Matched settlement periods</span><strong>{report.matched} / {report.expected} half-hours ({report.matched} hourly forecasts)</strong></div><div className="daily-stat"><span>Forecast availability</span><strong>{fmt(report.coveragePct, 1)}% (of 48 half-hours; max 24/48 = 50%)</strong></div><div className="daily-stat"><span>Net energy forecast error*</span><strong>{fmt(report.netEnergyErrorMWh)} MWh</strong></div><div className="availability-track"><div style={{ width: `${report.coveragePct}%` }} /></div><div className="interpretation"><Icon name="info" size={17} /><span>{report.count ? report.biasMw > 0 ? 'Positive bias: the selected forecast overstated observed wind on average, a potential under-procurement exposure.' : 'Negative or neutral bias: the forecast did not systematically overstate observed wind on this day.' : 'No paired timestamps for this day. No accuracy claim is possible.'} *On matched periods only; not a procurement order.</span></div></section></div>}
           {tab === 'overview' && <section className="surface daily-table"><div className="surface-head"><div><div className="section-eyebrow">DAILY PERFORMANCE</div><h2>Historical reliability by decision date</h2><p>Select a row to investigate its forecast record.</p></div><button className="plain-btn" onClick={() => setTab('accuracy')}>Review all days <Icon name="arrow" size={16} /></button></div><DailyTable daily={data.daily.slice(0, 9)} selected={report.decisionDate} onChoose={d => { setSelectedDay(d); setTab('explorer'); }} /></section>}
-          {tab === 'accuracy' && <><div className="diagnostics-strip"><div><span>RMSE</span><strong>{fmt(data.metrics.rmseMw)} MW</strong></div><div><span>Overforecast frequency</span><strong>{fmt(data.metrics.overforecastRatePct, 1)}%</strong></div><div><span>Net matched energy error</span><strong>{fmt(data.metrics.netEnergyErrorMWh)} MWh</strong></div><div><span>Actual generation coverage</span><strong>{fmt(100 * data.metrics.actualPeriods / data.metrics.expectedPeriods, 1)}%</strong></div></div><section className="surface chart-card fullchart"><div className="surface-head"><div><div className="section-eyebrow">ERROR BY DECISION DAY</div><h2>Magnitude of forecasting uncertainty</h2><p>Daily mean absolute error and P90 absolute error in MW, based only on matched timestamps.</p></div></div><div className="legend"><span><i className="key-actual" />MAE</span><span><i className="key-forecast" />P90 absolute error</span></div><ForecastChart rows={trend} compact title="Daily MAE and P90 absolute error" /></section><section className="surface daily-table"><div className="surface-head"><div><div className="section-eyebrow">COMPLETE PERIOD REVIEW</div><h2>31 decision days, side by side</h2></div></div><DailyTable daily={data.daily} selected={report.decisionDate} onChoose={d => { setSelectedDay(d); setTab('explorer'); }} /></section></>}
-          {tab === 'explorer' && <section className="surface daily-table"><div className="surface-head"><div><div className="section-eyebrow">AUDIT TRAIL</div><h2>Every half-hour timestamp</h2><p>Values and selected publication time are preserved; missing observations remain blank.</p></div><Tag>{periods.filter(x => x.error != null).length} matched</Tag></div><div className="table-scroll"><table><thead><tr><th>Delivery time (UK)</th><th>Selected publish time (UK)</th><th className="number">Forecast (MW)</th><th className="number">Actual (MW)</th><th className="number">Error (MW)</th></tr></thead><tbody>{periods.map(p => <tr key={p.startTime}><td>{timeFormat(p.startTime)}</td><td>{timeFormat(p.publishTime)}</td><td className="number">{p.forecast == null ? '—' : fmt(p.forecast)}</td><td className="number">{p.actual == null ? '—' : fmt(p.actual)}</td><td className={'number ' + (p.error > 0 ? 'pos-error' : p.error < 0 ? 'neg-error' : '')}>{p.error == null ? '—' : `${p.error > 0 ? '+' : ''}${fmt(p.error)}`}</td></tr>)}</tbody></table></div></section>}
+          {tab === 'accuracy' && <><div className="diagnostics-strip"><div><span>RMSE</span><strong>{fmt(data.metrics.rmseMw)} MW</strong></div><div><span>Overforecast frequency</span><strong>{fmt(data.metrics.overforecastRatePct, 1)}%</strong></div><div><span>Net matched energy error</span><strong>{fmt(data.metrics.netEnergyErrorMWh)} MWh</strong></div><div><span>Actual generation coverage</span><strong>{fmt(100 * data.metrics.actualPeriods / data.metrics.expectedPeriods, 1)}% ({data.metrics.actualPeriods}/{data.metrics.expectedPeriods} half-hours)</strong></div></div><section className="surface chart-card fullchart"><div className="surface-head"><div><div className="section-eyebrow">ERROR BY DECISION DAY</div><h2>Magnitude of forecasting uncertainty</h2><p>Daily mean absolute error and P90 absolute error in MW, based only on matched timestamps.</p></div></div><div className="legend"><span><i className="key-actual" />MAE</span><span><i className="key-forecast" />P90 absolute error</span></div><ForecastChart rows={trend} compact title="Daily MAE and P90 absolute error" /></section><section className="surface daily-table"><div className="surface-head"><div><div className="section-eyebrow">COMPLETE PERIOD REVIEW</div><h2>31 decision days, side by side</h2></div></div><DailyTable daily={data.daily} selected={report.decisionDate} onChoose={d => { setSelectedDay(d); setTab('explorer'); }} /></section></>}
+          {tab === 'explorer' && <section className="surface daily-table"><div className="surface-head"><div><div className="section-eyebrow">AUDIT TRAIL</div><h2>Every half-hour timestamp</h2><p>Values and selected publication time are preserved; missing observations remain blank.</p></div><Tag>{periods.filter(x => x.error != null).length} / 48 settlement periods matched (hourly WINDFOR)</Tag></div><div className="table-scroll"><table><thead><tr><th>Delivery time (UK)</th><th>Selected publish time (UK)</th><th className="number">Forecast (hourly MW)</th><th className="number">Actual (half-hourly MW)</th><th className="number">Error (MW)</th></tr></thead><tbody>{periods.map(p => <tr key={p.startTime}><td>{timeFormat(p.startTime)}</td><td>{timeFormat(p.publishTime)}</td><td className="number">{p.forecast == null ? <span className="na-text" title="WINDFOR publishes hourly; no half-hour forecast published">—</span> : fmt(p.forecast)}</td><td className="number">{p.actual == null ? '—' : fmt(p.actual)}</td><td className={'number ' + (p.error > 0 ? 'pos-error' : p.error < 0 ? 'neg-error' : '')}>{p.error == null ? '—' : `${p.error > 0 ? '+' : ''}${fmt(p.error)}`}</td></tr>)}</tbody></table></div></section>}
 
           {/* ── Walk-forward Bias Backtest ── */}
           {tab === 'backtest' && <div className="backtest-shell">
-            <div className="notice" style={{ marginTop: 0, marginBottom: 18 }}><Icon name="info" size={17} /><span><strong>Exploratory retrospective only.</strong> {backtest?.disclaimer || 'Each day\'s bias adjustment is computed strictly from prior days\' data that would have been observable at that cutoff.'}</span></div>
+            <div className="notice" style={{ marginTop: 0, marginBottom: 18 }}><Icon name="info" size={17} /><span><strong>Exploratory retrospective:</strong> {backtest?.disclaimer ? backtest.disclaimer.replace(/^Exploratory retrospective (analysis )?only\.\s*/i, '') : "The mean bias is estimated from strictly prior days' data that would have been observable at that cutoff. This does not represent a proven forward strategy, a prediction interval, or a financial saving estimate."}</span></div>
             {btBusy && <div className="bt-loading"><Icon name="refresh" size={18} />Computing walk-forward backtest…</div>}
             {!btBusy && backtest && <>
               <div className="bt-summary-grid">
                 <div className="surface bt-summary-card">
                   <div className="section-eyebrow">MONTH SUMMARY (ELIGIBLE DAYS ONLY)</div>
                   <h2>Original vs. adjusted</h2>
-                  <p>Based on {backtest.daysWithEnoughHistory} of 31 decision days with ≥{backtest.minTrainingPairs} prior matched pairs.</p>
+                  <p>Based on {backtest.daysWithEnoughHistory} of 31 decision days with ≥{backtest.minTrainingPairs} prior matched hourly pairs.</p>
                   <div className="bt-compare-row">
                     <div className="bt-compare-block">
                       <div className="bt-compare-label">Original MAE</div>
@@ -240,7 +257,7 @@ export default function App() {
                   <div className="section-eyebrow">ALIGNMENT NOTE</div>
                   <h2>WINDFOR vs FUELHH</h2>
                   <p style={{ fontSize: 12, lineHeight: 1.8, color: '#6c838e', marginTop: 12 }}>{backtest.alignmentNote}</p>
-                  <div className="bt-stat-row" style={{ marginTop: 20 }}><span>Min. training pairs required</span><strong>{backtest.minTrainingPairs}</strong></div>
+                  <div className="bt-stat-row" style={{ marginTop: 20 }}><span>Min. training pairs required</span><strong>{backtest.minTrainingPairs} prior matched hourly observations</strong></div>
                   <div className="bt-stat-row"><span>Days with enough history</span><strong>{backtest.daysWithEnoughHistory} / 31</strong></div>
                   <div className="bt-stat-row"><span>Days insufficient history</span><strong>{31 - backtest.daysWithEnoughHistory} / 31 (shown as N/A)</strong></div>
                 </div>
@@ -251,13 +268,13 @@ export default function App() {
               </section>
               <section className="surface daily-table" style={{ marginTop: 20 }}>
                 <div className="surface-head"><div><div className="section-eyebrow">DAILY BACKTEST TABLE</div><h2>Training pairs and error comparison</h2></div></div>
-                <div className="table-scroll"><table><thead><tr><th>Decision day</th><th className="number">Training pairs</th><th className="number">Mean bias used (MW)</th><th className="number">Orig. MAE (MW)</th><th className="number">Adj. MAE (MW)</th><th className="number">Improved / Worsened</th></tr></thead><tbody>{backtest.daily.map(d => <tr key={d.decisionDate} className={d.hasEnoughHistory ? '' : 'dim-row'}>
+                <div className="table-scroll"><table><thead><tr><th>Decision day</th><th className="number">Prior training pairs</th><th className="number">Mean bias used (MW)</th><th className="number">Orig. MAE (MW)</th><th className="number">Adj. MAE (MW)</th><th className="number">Improved / Worsened periods</th></tr></thead><tbody>{backtest.daily.map(d => <tr key={d.decisionDate} className={d.hasEnoughHistory ? '' : 'dim-row'}>
                   <td><strong>{dayFormat(d.decisionDate, { year: 'numeric' })}</strong></td>
-                  <td className="number">{d.trainingPairs}</td>
+                  <td className="number" title="Prior matched hourly pairs available before cutoff">{d.trainingPairs}</td>
                   <td className={'number ' + (d.meanBiasMw > 0 ? 'pos-error' : d.meanBiasMw < 0 ? 'neg-error' : '')}>{d.meanBiasMw != null ? `${d.meanBiasMw > 0 ? '+' : ''}${fmt(d.meanBiasMw)}` : <span className="na-text">Insufficient history</span>}</td>
                   <td className="number">{d.originalMetrics?.maeMw != null ? fmt(d.originalMetrics.maeMw) : '—'}</td>
                   <td className="number">{d.hasEnoughHistory && d.adjustedMetrics?.maeMw != null ? fmt(d.adjustedMetrics.maeMw) : <span className="na-text">—</span>}</td>
-                  <td className="number">{d.hasEnoughHistory ? `${d.improvedPeriods ?? 0}↑ / ${d.worsenedPeriods ?? 0}↓` : <span className="na-text">—</span>}</td>
+                  <td className="number">{d.hasEnoughHistory ? `${d.improvedPeriods ?? 0} improved / ${d.worsenedPeriods ?? 0} worsened` : <span className="na-text">—</span>}</td>
                 </tr>)}</tbody></table></div>
               </section>
             </>}
@@ -283,8 +300,8 @@ export default function App() {
                   </p>
                   <div className="risk-pills">
                     <RiskPill label="Mean forecast" value={riskBrief.forecastSummary.meanForecastMw != null ? `${fmt(riskBrief.forecastSummary.meanForecastMw)} MW` : '—'} tone="neutral" />
-                    <RiskPill label="Periods with forecast" value={`${riskBrief.forecastSummary.periodsWithForecast} / ${riskBrief.forecastSummary.totalPeriods}`} tone="neutral" />
-                    <RiskPill label="WINDFOR coverage" value={`${fmt(riskBrief.forecastSummary.coveragePct, 1)}%`} tone={riskBrief.forecastSummary.coveragePct < 60 ? 'warn' : 'ok'} />
+                    <RiskPill label="Periods with forecast" value={`${riskBrief.forecastSummary.periodsWithForecast} / ${riskBrief.forecastSummary.totalPeriods} (${riskBrief.forecastSummary.periodsWithForecast} hourly)`} tone="neutral" />
+                    <RiskPill label="WINDFOR coverage" value={`${fmt(riskBrief.forecastSummary.coveragePct, 1)}% (hourly series)`} tone={riskBrief.forecastSummary.coveragePct < 40 ? 'warn' : 'ok'} />
                     <RiskPill label="Data freshness" value={riskBrief.forecastSummary.dataFreshnessHours != null ? `${fmt(riskBrief.forecastSummary.dataFreshnessHours, 1)} h before cutoff` : '—'} tone={riskBrief.forecastSummary.dataFreshnessHours > 3 ? 'warn' : 'ok'} />
                   </div>
                   <div className="daily-stat" style={{ marginTop: 12 }}><span>Latest WINDFOR publish (UK)</span><strong>{timeFormat(riskBrief.forecastSummary.latestPublishTime)}</strong></div>
@@ -301,7 +318,7 @@ export default function App() {
                     </>;
                   })()}
                   <div className="daily-rule" style={{ margin: '16px 0 8px' }} />
-                  <div className="daily-stat"><span>Prior matched pairs</span><strong>{riskBrief.priorHistory.matchedPairs}</strong></div>
+                  <div className="daily-stat"><span>Prior matched pairs</span><strong>{riskBrief.priorHistory.matchedPairs} hourly pairs</strong></div>
                   <div className="daily-stat"><span>Historical bias</span><strong className={riskBrief.priorHistory.biasMw > 0 ? 'pos-error' : 'neg-error'}>{riskBrief.priorHistory.biasMw != null ? `${riskBrief.priorHistory.biasMw > 0 ? '+' : ''}${fmt(riskBrief.priorHistory.biasMw)} MW` : '—'}</strong></div>
                   <div className="daily-stat"><span>Historical MAE</span><strong>{riskBrief.priorHistory.maeMw != null ? `${fmt(riskBrief.priorHistory.maeMw)} MW` : '—'}</strong></div>
                   <div className="daily-stat"><span>Overforecast rate</span><strong>{riskBrief.priorHistory.overforecastRatePct != null ? `${fmt(riskBrief.priorHistory.overforecastRatePct, 1)}%` : '—'}</strong></div>
@@ -310,7 +327,7 @@ export default function App() {
               </div>
               {riskBrief.recentDailyHistory?.length > 0 && <section className="surface daily-table" style={{ marginTop: 20 }}>
                 <div className="surface-head"><div><div className="section-eyebrow">RECENT DECISION HISTORY (LAST 7 PRIOR DAYS)</div><h2>Day-level accuracy context</h2>{riskBrief.largeMissDays?.length > 0 && <p style={{ color: '#c07437', fontSize: 11, marginTop: 6 }}><Icon name="alert" size={14} /> {riskBrief.largeMissDays.length} day(s) with large misses (MAE {'>'} {fmt(riskBrief.largeMissThresholdMw)} MW, 1.5&times; historical average). Large misses may indicate conditions that challenge systematic forecasts — consider whether similar conditions apply today.</p>}</div></div>
-                <div className="table-scroll"><table><thead><tr><th>Decision day</th><th className="number">Pairs</th><th className="number">MAE (MW)</th><th className="number">Bias (MW)</th><th className="number">Overforecast rate</th></tr></thead><tbody>{riskBrief.recentDailyHistory.map(d => <tr key={d.decisionDate} className={riskBrief.largeMissDays?.some(x => x.decisionDate === d.decisionDate) ? 'large-miss-row' : ''}>
+                <div className="table-scroll"><table><thead><tr><th>Decision day</th><th className="number">Matched pairs</th><th className="number">MAE (MW)</th><th className="number">Bias (MW)</th><th className="number">Overforecast rate</th></tr></thead><tbody>{riskBrief.recentDailyHistory.map(d => <tr key={d.decisionDate} className={riskBrief.largeMissDays?.some(x => x.decisionDate === d.decisionDate) ? 'large-miss-row' : ''}>
                   <td><strong>{dayFormat(d.decisionDate, { year: 'numeric' })}</strong></td>
                   <td className="number">{d.n}</td>
                   <td className="number">{fmt(d.maeMw)}</td>
@@ -329,4 +346,4 @@ export default function App() {
   </div>;
 }
 
-function DailyTable({ daily, selected, onChoose }) { return <div className="table-scroll"><table><thead><tr><th>Decision day</th><th>Delivery day</th><th className="number">MAE</th><th className="number">Bias</th><th className="number">Coverage</th><th className="number">Paired</th><th></th></tr></thead><tbody>{daily.map(d => <tr key={d.decisionDate} onClick={() => onChoose(d.decisionDate)} className={'click-row ' + (d.decisionDate === selected ? 'selected-row' : '')}><td><strong>{dayFormat(d.decisionDate, { year: 'numeric' })}</strong></td><td>{dayFormat(d.deliveryDate, { year: 'numeric' })}</td><td className="number">{d.maeMw == null ? '—' : `${fmt(d.maeMw)} MW`}</td><td className={'number ' + (d.biasMw > 0 ? 'pos-error' : d.biasMw < 0 ? 'neg-error' : '')}>{d.biasMw == null ? '—' : `${d.biasMw > 0 ? '+' : ''}${fmt(d.biasMw)} MW`}</td><td className="number"><div className="table-coverage"><div style={{ width: `${d.coveragePct}%` }} /></div>{fmt(d.coveragePct, 1)}%</td><td className="number">{d.matched} / {d.expected}</td><td className="end-cell"><Icon name="chevron" size={17} /></td></tr>)}</tbody></table></div>; }
+function DailyTable({ daily, selected, onChoose }) { return <div className="table-scroll"><table><thead><tr><th>Decision day</th><th>Delivery day</th><th className="number">MAE</th><th className="number">Bias</th><th className="number">Coverage</th><th className="number" title="Matched hourly forecasts out of 48 half-hourly settlement periods">Paired (24h/48hh)</th><th></th></tr></thead><tbody>{daily.map(d => <tr key={d.decisionDate} onClick={() => onChoose(d.decisionDate)} className={'click-row ' + (d.decisionDate === selected ? 'selected-row' : '')}><td><strong>{dayFormat(d.decisionDate, { year: 'numeric' })}</strong></td><td>{dayFormat(d.deliveryDate, { year: 'numeric' })}</td><td className="number">{d.maeMw == null ? '—' : `${fmt(d.maeMw)} MW`}</td><td className={'number ' + (d.biasMw > 0 ? 'pos-error' : d.biasMw < 0 ? 'neg-error' : '')}>{d.biasMw == null ? '—' : `${d.biasMw > 0 ? '+' : ''}${fmt(d.biasMw)} MW`}</td><td className="number"><div className="table-coverage"><div style={{ width: `${d.coveragePct}%` }} /></div>{fmt(d.coveragePct, 1)}%</td><td className="number" title={`${d.matched} matched hourly forecasts out of ${d.expected} half-hour settlement periods`}>{d.matched} / {d.expected}</td><td className="end-cell"><Icon name="chevron" size={17} /></td></tr>)}</tbody></table></div>; }

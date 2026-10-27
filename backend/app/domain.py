@@ -403,9 +403,8 @@ def walk_forward_backtest(
     all_adj = []
     for d in eligible_days:
         for p in d["periods"]:
-            if p["error"] is not None:
+            if p["error"] is not None and p["adjustedError"] is not None:
                 all_orig.append({"forecast": p["forecast"], "actual": p["actual"]})
-            if p["adjustedError"] is not None:
                 all_adj.append({"forecast": p["adjustedForecast"], "actual": p["actual"]})
 
     return {

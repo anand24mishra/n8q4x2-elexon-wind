@@ -286,9 +286,14 @@ def test_adjusted_forecast_never_negative():
 def test_same_eval_set_for_original_and_adjusted():
     """originalMetrics.count must equal adjustedMetrics.count for any day
     that has enough history, ensuring the comparison is apples-to-apples.
+    Also summaryOriginal.count must equal summaryAdjusted.count across all eligible days.
     """
     actuals, forecasts = _make_dense_dataset(10)
     result = walk_forward_backtest(actuals, forecasts)
+    assert result["summaryOriginal"]["count"] == result["summaryAdjusted"]["count"], (
+        f"Summary count mismatch: orig={result['summaryOriginal']['count']}, "
+        f"adj={result['summaryAdjusted']['count']}"
+    )
     for d in result["daily"]:
         if d["hasEnoughHistory"] and d["adjustedMetrics"] is not None:
             assert d["originalMetrics"]["count"] == d["adjustedMetrics"]["count"], (
