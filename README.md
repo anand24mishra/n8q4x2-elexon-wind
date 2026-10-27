@@ -78,6 +78,8 @@ n8q4x2/
 │   ├── Dockerfile
 │   ├── requirements.txt       Runtime: fastapi, uvicorn, httpx
 │   ├── requirements-dev.txt   Dev: pytest, anyio, httpx
+│   ├── api/
+│   │   └── index.py           Vercel entry point (re-exports FastAPI app)
 │   └── app/
 │       ├── main.py            API routes, atomic cache, Vercel/Docker refresh strategy
 │       ├── elexon.py          Elexon BMRS HTTP adapter with retry and validation
@@ -174,29 +176,33 @@ PYTHONPATH=. python -m pytest -v
 
 ## Deployment
 
-### Vercel
+### Vercel (Services — single project)
 
-`vercel.json` at the repository root configures one project for both tiers:
+`vercel.json` uses Vercel's Services format: each directory is a standalone deployable unit, routed by top-level `rewrites`.
 
-| Route | Handler |
-|-------|---------|
-| `/api/*` | `api/index.py` — Python serverless, `maxDuration 60 s`, `memory 1024 MB` |
-| `/*` | `frontend/dist` — static CDN, SPA fallback to `index.html` |
+| Route | Service | Notes |
+|-------|---------|-------|
+| `/api/*` | `backend` — FastAPI serverless | `maxDuration 60 s`, `memory 1024 MB` |
+| `/*` | `frontend` — Vite static CDN | SPA fallback to `index.html` |
 
-Two serverless-specific adaptations in `backend/app/main.py` (both guarded by `os.getenv("VERCEL")`, which Vercel injects automatically):
+**No service bindings** — the React frontend calls `/api/*` from the browser (public rewrites handle routing); the FastAPI backend only calls Elexon externally. No server-to-server traffic between the two services.
 
-1. **Cache path** — Lambda filesystems are read-only except `/tmp`. Cache writes go to `/tmp/elexon-january-2026.json` on Vercel; Docker uses the named volume path.
-2. **Synchronous refresh** — Background tasks created via `asyncio.create_task()` are dropped when the Lambda returns its response. `POST /api/refresh` awaits the Elexon import directly on Vercel so the cache is populated before responding.
+Vercel's `framework: "fastapi"` discovers the ASGI app at `backend/api/index.py` (within the service root). That shim adds `backend/` to `sys.path` and re-exports the FastAPI `app` object from `backend/app/main.py`.
 
-> **Note:** `/tmp` is shared only within a warm Lambda instance. A cold start triggers a fresh Elexon import on the first request.
+Two runtime adaptations in `backend/app/main.py` (guarded by `os.getenv("VERCEL")`, injected automatically):
+
+1. **Cache path** — writes to `/tmp` (only writable Lambda path) instead of `/app/data/`
+2. **Synchronous refresh** — awaits `refresh_data()` directly instead of `asyncio.create_task()`, which Vercel drops when the function returns its response
+
+> `/tmp` is shared only across warm Lambda instances. Cold starts trigger a fresh Elexon import on the first request.
 
 ```bash
 npm install -g vercel
 vercel login
-vercel --prod          # run from repo root
+vercel --prod          # run from repo root; follow prompts to link project
 ```
 
-Or connect the GitHub repository in the Vercel dashboard — no environment variables required.
+Or import via the Vercel dashboard — choose **"Import multi-service project"**, no environment variables required.
 
 ### Heroku
 

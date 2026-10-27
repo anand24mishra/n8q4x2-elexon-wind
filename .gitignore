@@ -6,6 +6,6 @@ __pycache__/
 .env
 backend/data/
 backend/.venv/
-api/__pycache__/
+backend/api/__pycache__/
 .DS_Store
 DEMO_SCRIPT.md
