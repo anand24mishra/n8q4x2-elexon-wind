@@ -49,3 +49,20 @@ def test_refresh_keeps_last_successful_cache_on_upstream_error(monkeypatch, tmp_
     assert main.state['status'] == 'failed'
     assert (tmp_path / 'cache.json').read_text() == saved
     assert client.get('/api/dashboard').status_code == 200
+def test_vercel_env_sets_tmp_cache_path(monkeypatch):
+    """When the VERCEL environment variable is present, the cache must live in
+    /tmp so the application can write to it inside Vercel's read-only Lambda
+    filesystem.  This test reloads the module with the env var set and confirms
+    the path prefix.
+    """
+    import importlib
+    monkeypatch.setenv("VERCEL", "1")
+    # Reload to pick up the new env var at module level.
+    import app.main as m
+    importlib.reload(m)
+    assert str(m.CACHE_FILE).startswith("/tmp"), (
+        f"Expected /tmp cache on Vercel, got: {m.CACHE_FILE}"
+    )
+    # Restore: reload without the env var so other tests see the normal path.
+    monkeypatch.delenv("VERCEL", raising=False)
+    importlib.reload(m)

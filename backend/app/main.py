@@ -1,4 +1,14 @@
-"""Production API: Elexon-only historical forecast analysis with atomic file cache."""
+"""Production API: Elexon-only historical forecast analysis with atomic file cache.
+
+Vercel serverless compatibility notes
+--------------------------------------
+- VERCEL env var is injected automatically by Vercel's runtime.
+- Cache is written to /tmp (only writable path in Lambda).  Docker uses
+  /app/data via CACHE_FILE env var or the default path.
+- asyncio.create_task() tasks are silently dropped when a Vercel function
+  returns its HTTP response, so POST /api/refresh awaits refresh_data()
+  synchronously on Vercel instead of backgrounding it.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +27,14 @@ from .elexon import SOURCES, load_january
 
 app = FastAPI(title="Windward | Elexon Wind Intelligence", version="2.0.0", description="January 2026 decision-time GB wind forecast evaluation")
 app.add_middleware(CORSMiddleware, allow_origins=[v.strip() for v in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:8080").split(",")], allow_methods=["GET", "POST"], allow_headers=["*"])
-CACHE_FILE = Path(os.getenv("CACHE_FILE", "/app/data/elexon-january-2026.json"))
+# On Vercel the only writable filesystem path is /tmp.  Docker uses the
+# volume-mounted path configured via CACHE_FILE env var.
+_IS_VERCEL = bool(os.getenv("VERCEL"))
+_DEFAULT_CACHE = (
+    "/tmp/elexon-january-2026.json" if _IS_VERCEL
+    else "/app/data/elexon-january-2026.json"
+)
+CACHE_FILE = Path(os.getenv("CACHE_FILE", _DEFAULT_CACHE))
 state = {"status": "idle", "done": 0, "total": 2, "error": None, "lastSynced": None}
 _task: asyncio.Task | None = None
 
@@ -86,9 +103,18 @@ async def get_status():
 @app.post("/api/refresh", response_model=RefreshResponse, status_code=202)
 async def start_refresh():
     global _task
-    if not _task or _task.done():
-        state.update(status="loading", done=0, total=2, error=None)
-        _task = asyncio.create_task(refresh_data())
+    if _IS_VERCEL:
+        # Vercel serverless: asyncio.create_task() tasks are silently dropped
+        # when the function returns its response.  Await directly so the /tmp
+        # cache is fully written before we return.
+        if state.get("status") != "loading":
+            await refresh_data()
+    else:
+        # Docker / local dev: genuine background task so the endpoint returns
+        # immediately and the client polls /api/status for progress.
+        if not _task or _task.done():
+            state.update(status="loading", done=0, total=2, error=None)
+            _task = asyncio.create_task(refresh_data())
     cached = cached_data()
     return {**state, "lastSynced": cached.get("fetchedAt") if cached else None}
 
