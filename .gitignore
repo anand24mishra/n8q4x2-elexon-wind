@@ -9,3 +9,4 @@ backend/.venv/
 backend/api/__pycache__/
 .DS_Store
 DEMO_SCRIPT.md
+RECORDING_SCRIPT.md
