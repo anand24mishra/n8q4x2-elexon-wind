@@ -181,7 +181,37 @@ The first run and a full Docker/React build could not be exercised in this restr
 4. Open the app's URL, allow the real Elexon import to finish, and validate the analysis, selected dates, coverage and CSV export as above.
 5. Put the public URL in the submission form and check the app without a logged-in session. **Deploying does not make the real Elexon dataset magically validated.**
 
-**Deployment URL:** Not yet deployed. Replace this line with the working Heroku URL only after verification.
+**Deployment URL:** Not yet deployed. Replace this line with the verified public URL after deployment.
+
+### Vercel (single project — frontend + serverless backend)
+
+`vercel.json` at the repository root configures one Vercel project that serves both tiers:
+
+| Route | Handler | Notes |
+|-------|---------|-------|
+| `/api/*` | `api/index.py` (Python serverless function) | `maxDuration 60 s`, `memory 1024 MB` |
+| `/*` | `frontend/dist` (static) | Vite build output; SPA fallback to `index.html` |
+
+**Serverless adaptations** (see `backend/app/main.py` module docstring):
+
+1. **Cache path** — Vercel's Lambda filesystem is read-only except `/tmp`. When the `VERCEL` env var is present (injected automatically by Vercel's runtime), the cache is written to `/tmp/elexon-january-2026.json` instead of `/app/data/`. Docker Compose is unaffected (no `VERCEL` var).
+2. **Synchronous refresh** — `asyncio.create_task()` tasks are silently dropped when a Vercel function returns its HTTP response. `POST /api/refresh` therefore awaits `refresh_data()` directly on Vercel, blocking until the Elexon import completes before returning 202. The Docker path keeps the original background-task behaviour.
+
+**Limitation:** `/tmp` is ephemeral and shared only across warm invocations of the same Lambda instance. Cold starts (new instance) have no cache and will trigger an automatic re-import on the first page visit.
+
+**Deploy steps:**
+
+```bash
+npm install -g vercel          # Install Vercel CLI
+vercel login                   # Authenticate
+cd n8q4x2                      # Repository root
+vercel --prod                  # Deploy; follow prompts to link to project
+```
+
+Or connect the GitHub repository in the Vercel dashboard (Settings → Git → Import Project). Set no extra environment variables — `VERCEL` is injected automatically.
+
+After deployment: open the Vercel URL, click **Sync Elexon** (the request blocks until Elexon data is imported, typically 10–30 s), then verify the dashboard shows real data (`source: "elexon"`, `rawRecords.actual: 1488`).
+
 
 **Public GitHub repo:** https://github.com/anand24mishra/n8q4x2-elexon-wind — published and publicly accessible.
 
