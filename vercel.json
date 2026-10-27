@@ -3,9 +3,7 @@
   "services": {
     "backend": {
       "root": "backend",
-      "framework": "fastapi",
-      "maxDuration": 60,
-      "memory": 1024
+      "framework": "fastapi"
     },
     "frontend": {
       "root": "frontend",
